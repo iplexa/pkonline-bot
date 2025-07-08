@@ -4,7 +4,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery
 from db.crud import get_next_application, update_application_status, get_employee_by_tg_id, employee_has_group
-from db.session import get_session
 from db.models import ApplicationStatusEnum
 from keyboards.lk import lk_queue_keyboard, lk_decision_keyboard
 from keyboards.main import main_menu_keyboard
@@ -18,38 +17,34 @@ class LKStates(StatesGroup):
 
 @router.callback_query(F.data == "lk_menu")
 async def lk_menu_entry(callback: CallbackQuery, state: FSMContext):
-    async for session in get_session():
-        emp = await get_employee_by_tg_id(session, str(callback.from_user.id))
-        if not emp or not await employee_has_group(session, str(callback.from_user.id), "lk"):
-            return
+    emp = await get_employee_by_tg_id(str(callback.from_user.id))
+    if not emp or not await employee_has_group(str(callback.from_user.id), "lk"):
+        return
     await callback.message.edit_text("Очередь ЛК. Нажмите кнопку, чтобы получить заявление.", reply_markup=lk_queue_keyboard(menu=True))
 
 @router.callback_query(F.data == "get_lk_application")
 async def get_lk_application(callback: CallbackQuery, state: FSMContext):
-    async for session in get_session():
-        emp = await get_employee_by_tg_id(session, str(callback.from_user.id))
-        if not emp or not await employee_has_group(session, str(callback.from_user.id), "lk"):
-            return
-        app = await get_next_application(session, queue_type="lk")
-        if not app:
-            await callback.message.edit_text("Очередь пуста.", reply_markup=lk_queue_keyboard(menu=True))
-            return
-        await state.update_data(app_id=app.id)
-        await callback.message.edit_text(f"Заявление: {app.fio}", reply_markup=lk_decision_keyboard(menu=True))
-        await state.set_state(LKStates.waiting_decision)
+    emp = await get_employee_by_tg_id(str(callback.from_user.id))
+    if not emp or not await employee_has_group(str(callback.from_user.id), "lk"):
+        return
+    app = await get_next_application(queue_type="lk")
+    if not app:
+        await callback.message.edit_text("Очередь пуста.", reply_markup=lk_queue_keyboard(menu=True))
+        return
+    await state.update_data(app_id=app.id)
+    await callback.message.edit_text(f"Заявление: {app.fio}", reply_markup=lk_decision_keyboard(menu=True))
+    await state.set_state(LKStates.waiting_decision)
 
 @router.callback_query(LKStates.waiting_decision, F.data.in_(["accept_lk", "reject_lk", "problem_lk", "return_lk"]))
 async def process_lk_decision(callback: CallbackQuery, state: FSMContext):
-    async for session in get_session():
-        emp = await get_employee_by_tg_id(session, str(callback.from_user.id))
-        if not emp or not await employee_has_group(session, str(callback.from_user.id), "lk"):
-            return
+    emp = await get_employee_by_tg_id(str(callback.from_user.id))
+    if not emp or not await employee_has_group(str(callback.from_user.id), "lk"):
+        return
     data = await state.get_data()
     app_id = data.get("app_id")
     employee_id = callback.from_user.id
     if callback.data == "accept_lk":
-        async for session in get_session():
-            await update_application_status(session, app_id, ApplicationStatusEnum.ACCEPTED, employee_id=employee_id)
+        await update_application_status(app_id, ApplicationStatusEnum.ACCEPTED, employee_id=employee_id)
         await callback.message.edit_text("Заявление принято.", reply_markup=lk_queue_keyboard(menu=True))
         await callback.bot.send_message(ADMIN_CHAT_ID, f"ЛК: {callback.from_user.full_name} принял заявление {app_id}")
         await state.clear()
@@ -63,18 +58,16 @@ async def process_lk_decision(callback: CallbackQuery, state: FSMContext):
 
 @router.message(LKStates.waiting_reason)
 async def process_lk_reason(message: Message, state: FSMContext):
-    async for session in get_session():
-        emp = await get_employee_by_tg_id(session, str(message.from_user.id))
-        if not emp or not await employee_has_group(session, str(message.from_user.id), "lk"):
-            return
+    emp = await get_employee_by_tg_id(str(message.from_user.id))
+    if not emp or not await employee_has_group(str(message.from_user.id), "lk"):
+        return
     data = await state.get_data()
     app_id = data.get("app_id")
     decision = data.get("decision")
     employee_id = message.from_user.id
     reason = message.text
     status = ApplicationStatusEnum.REJECTED if decision == "reject_lk" else ApplicationStatusEnum.PROBLEM
-    async for session in get_session():
-        await update_application_status(session, app_id, status, reason=reason, employee_id=employee_id)
+    await update_application_status(app_id, status, reason=reason, employee_id=employee_id)
     await message.answer(f"Заявление {'отклонено' if status == ApplicationStatusEnum.REJECTED else 'помечено как проблемное'}.", reply_markup=lk_queue_keyboard(menu=True))
     await message.bot.send_message(ADMIN_CHAT_ID, f"ЛК: {message.from_user.full_name} {'отклонил' if status == ApplicationStatusEnum.REJECTED else 'пометил как проблемное'} заявление {app_id}. Причина: {reason}")
     await state.clear() 

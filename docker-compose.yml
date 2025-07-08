@@ -1,0 +1,31 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_DB: pkonline
+      POSTGRES_USER: pkonline
+      POSTGRES_PASSWORD: pkonline
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  bot:
+    build: .
+    command: ["python", "bot.py"]
+    environment:
+      BOT_TOKEN: "your-telegram-bot-token"
+      DB_DSN: "postgresql+asyncpg://pkonline:pkonline@db:5432/pkonline"
+      ADMIN_CHAT_ID: "0"
+      ADMIN_USER_ID: "123456789"
+    depends_on:
+      - db
+    restart: always
+    volumes:
+      - .:/app
+
+volumes:
+  pgdata: 

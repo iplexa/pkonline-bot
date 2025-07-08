@@ -5,7 +5,6 @@ from aiogram.fsm.state import State, StatesGroup
 from db.crud import (
     add_employee, remove_employee, add_group_to_employee, remove_group_from_employee, list_employees_with_groups, is_admin
 )
-from db.session import get_session
 from keyboards.admin import admin_menu_keyboard, group_choice_keyboard
 from keyboards.main import main_menu_keyboard
 
@@ -20,8 +19,7 @@ class AdminStates(StatesGroup):
     waiting_group_remove = State()
 
 async def check_admin(user_id: int) -> bool:
-    async for session in get_session():
-        return await is_admin(session, str(user_id))
+    return await is_admin(str(user_id))
 
 @router.callback_query(F.data == "admin_menu")
 async def admin_menu(callback: CallbackQuery, state: FSMContext):
@@ -46,8 +44,7 @@ async def admin_add_employee_fio(message: Message, state: FSMContext):
     data = await state.get_data()
     tg_id = data.get("tg_id")
     fio = message.text.strip()
-    async for session in get_session():
-        await add_employee(session, tg_id, fio)
+    await add_employee(tg_id, fio)
     await message.answer(f"Сотрудник {fio} ({tg_id}) добавлен.", reply_markup=admin_menu_keyboard())
     await state.clear()
 
@@ -59,8 +56,7 @@ async def admin_remove_employee(callback: CallbackQuery, state: FSMContext):
 @router.message(AdminStates.waiting_tg_id_remove)
 async def admin_remove_employee_tg_id(message: Message, state: FSMContext):
     tg_id = message.text.strip()
-    async for session in get_session():
-        await remove_employee(session, tg_id)
+    await remove_employee(tg_id)
     await message.answer(f"Сотрудник {tg_id} удалён.", reply_markup=admin_menu_keyboard())
     await state.clear()
 
@@ -80,8 +76,7 @@ async def admin_add_group_choice(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     tg_id = data.get("tg_id")
     group = callback.data.replace("group_", "")
-    async for session in get_session():
-        ok = await add_group_to_employee(session, tg_id, group)
+    await add_group_to_employee(tg_id, group)
     await callback.message.edit_text(f"Группа {group} добавлена сотруднику {tg_id}.", reply_markup=admin_menu_keyboard())
     await state.clear()
 
@@ -101,15 +96,13 @@ async def admin_remove_group_choice(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     tg_id = data.get("tg_id")
     group = callback.data.replace("group_", "")
-    async for session in get_session():
-        ok = await remove_group_from_employee(session, tg_id, group)
+    await remove_group_from_employee(tg_id, group)
     await callback.message.edit_text(f"Группа {group} удалена у сотрудника {tg_id}.", reply_markup=admin_menu_keyboard())
     await state.clear()
 
 @router.callback_query(F.data == "admin_list_employees")
 async def admin_list_employees(callback: CallbackQuery, state: FSMContext):
-    async for session in get_session():
-        emps = await list_employees_with_groups(session)
+    emps = await list_employees_with_groups()
     text = "Сотрудники:\n" + "\n".join([
         f"{e['fio']} ({e['tg_id']}) {'[admin]' if e['is_admin'] else ''} — {', '.join(e['groups'])}" for e in emps
     ])

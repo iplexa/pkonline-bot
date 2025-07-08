@@ -1,6 +1,6 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-def main_menu_keyboard(is_admin=False, groups=None):
+def main_menu_keyboard(is_admin=False, groups=None, with_menu_button=False):
     if groups is None:
         groups = []
     buttons = []
@@ -16,5 +16,6 @@ def main_menu_keyboard(is_admin=False, groups=None):
             buttons.append([InlineKeyboardButton(text="Очередь ЕПГУ", callback_data="epgu_menu")])
         if "escalation" in groups:
             buttons.append([InlineKeyboardButton(text="Эскалация", callback_data="escalation_menu")])
-    buttons.append([InlineKeyboardButton(text="Меню", callback_data="main_menu")])
+    if with_menu_button:
+        buttons.append([InlineKeyboardButton(text="Меню", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons) 

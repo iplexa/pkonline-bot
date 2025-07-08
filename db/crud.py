@@ -1,4 +1,5 @@
 from sqlalchemy import select, update
+from sqlalchemy.orm import selectinload
 from .models import Application, ApplicationStatusEnum, Employee, Group
 from datetime import datetime
 from .session import get_session
@@ -52,15 +53,18 @@ async def find_application_by_fio(fio: str, queue_type: str):
 
 async def get_employee_by_tg_id(tg_id: str):
     async for session in get_session():
-        stmt = select(Employee).where(Employee.tg_id == tg_id)
+        stmt = select(Employee).where(Employee.tg_id == tg_id).options(selectinload(Employee.groups))
         result = await session.execute(stmt)
         return result.scalars().first()
 
 async def employee_has_group(tg_id: str, group_name: str):
     async for session in get_session():
-        stmt = select(Employee).where(Employee.tg_id == tg_id).join(Employee.groups).where(Group.name == group_name)
+        stmt = select(Employee).where(Employee.tg_id == tg_id).options(selectinload(Employee.groups))
         result = await session.execute(stmt)
-        return result.scalars().first() is not None
+        emp = result.scalars().first()
+        if not emp:
+            return False
+        return any(g.name == group_name for g in emp.groups)
 
 async def is_admin(tg_id: str):
     emp = await get_employee_by_tg_id(tg_id)

@@ -62,7 +62,7 @@ async def employee_has_group(tg_id: str, group_name: str):
         stmt = select(Employee).where(Employee.tg_id == tg_id).options(selectinload(Employee.groups))
         result = await session.execute(stmt)
         emp = result.scalars().first()
-        if not emp:
+        if not emp or not emp.groups:
             return False
         return any(g.name == group_name for g in emp.groups)
 
@@ -86,17 +86,19 @@ async def remove_employee(tg_id: str):
 
 async def add_group_to_employee(tg_id: str, group_name: str):
     async for session in get_session():
-        emp = await get_employee_by_tg_id(tg_id)
+        emp_result = await session.execute(select(Employee).where(Employee.tg_id == tg_id).options(selectinload(Employee.groups)))
+        emp = emp_result.scalars().first()
         if not emp:
             return False
-        group = await session.execute(select(Group).where(Group.name == group_name))
-        group = group.scalars().first()
+        group_result = await session.execute(select(Group).where(Group.name == group_name))
+        group = group_result.scalars().first()
         if not group:
             group = Group(name=group_name)
             session.add(group)
             await session.commit()
         if group not in emp.groups:
             emp.groups.append(group)
+            session.add(emp)
             await session.commit()
         return True
 
@@ -114,7 +116,7 @@ async def remove_group_from_employee(tg_id: str, group_name: str):
 
 async def list_employees_with_groups():
     async for session in get_session():
-        stmt = select(Employee)
+        stmt = select(Employee).options(selectinload(Employee.groups))
         result = await session.execute(stmt)
         employees = result.scalars().all()
         return [

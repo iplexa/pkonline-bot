@@ -17,10 +17,15 @@ class LKStates(StatesGroup):
 
 @router.callback_query(F.data == "lk_menu")
 async def lk_menu_entry(callback: CallbackQuery, state: FSMContext):
-    emp = await get_employee_by_tg_id(str(callback.from_user.id))
-    if not emp or not await employee_has_group(str(callback.from_user.id), "lk"):
-        return
-    await callback.message.edit_text("Очередь ЛК. Нажмите кнопку, чтобы получить заявление.", reply_markup=lk_queue_keyboard(menu=True))
+    try:
+        emp = await get_employee_by_tg_id(str(callback.from_user.id))
+        if not emp or not await employee_has_group(str(callback.from_user.id), "lk"):
+            return
+        await callback.message.edit_text("Очередь ЛК. Нажмите кнопку, чтобы получить заявление.", reply_markup=lk_queue_keyboard(menu=True))
+    except Exception as e:
+        await callback.message.answer(f"Ошибка: {e}")
+        import traceback
+        print(traceback.format_exc())
 
 @router.callback_query(F.data == "get_lk_application")
 async def get_lk_application(callback: CallbackQuery, state: FSMContext):

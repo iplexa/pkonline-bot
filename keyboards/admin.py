@@ -4,6 +4,7 @@ def admin_main_menu_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Управление сотрудниками", callback_data="admin_staff_menu")],
         [InlineKeyboardButton(text="Управление очередями", callback_data="admin_queue_menu")],
+        [InlineKeyboardButton(text="📊 Отчеты", callback_data="admin_reports_menu")],
         [InlineKeyboardButton(text="Меню", callback_data="main_menu")],
     ])
 
@@ -22,6 +23,14 @@ def admin_queue_menu_keyboard():
         [InlineKeyboardButton(text="Посмотреть очередь", callback_data="admin_view_queue")],
         [InlineKeyboardButton(text="Очистить очередь", callback_data="admin_clear_queue")],
         [InlineKeyboardButton(text="Загрузить заявления", callback_data="admin_upload_queue")],
+        [InlineKeyboardButton(text="Назад", callback_data="admin_menu")],
+    ])
+
+def admin_reports_menu_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Полный отчет", callback_data="admin_full_report")],
+        [InlineKeyboardButton(text="⏰ Отчет по рабочему времени", callback_data="admin_work_time_report")],
+        [InlineKeyboardButton(text="📋 Отчет по заявлениям", callback_data="admin_applications_report")],
         [InlineKeyboardButton(text="Назад", callback_data="admin_menu")],
     ])
 

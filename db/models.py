@@ -11,6 +11,11 @@ class ApplicationStatusEnum(enum.Enum):
     REJECTED = "rejected"
     PROBLEM = "problem"
 
+class WorkDayStatusEnum(enum.Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    FINISHED = "finished"
+
 class Application(Base):
     __tablename__ = "applications"
     id = Column(Integer, primary_key=True)
@@ -42,4 +47,28 @@ class Employee(Base):
     fio = Column(String, nullable=True)
     is_admin = Column(Boolean, default=False)
     applications = relationship("Application", back_populates="processed_by")
-    groups = relationship("Group", secondary="employee_groups", back_populates="employees") 
+    groups = relationship("Group", secondary="employee_groups", back_populates="employees")
+    work_days = relationship("WorkDay", back_populates="employee")
+
+class WorkDay(Base):
+    __tablename__ = "work_days"
+    id = Column(Integer, primary_key=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    employee = relationship("Employee", back_populates="work_days")
+    date = Column(DateTime, nullable=False)  # Дата рабочего дня
+    start_time = Column(DateTime, nullable=True)  # Время начала рабочего дня
+    end_time = Column(DateTime, nullable=True)  # Время окончания рабочего дня
+    total_work_time = Column(Integer, default=0)  # Общее время работы в секундах
+    total_break_time = Column(Integer, default=0)  # Общее время перерывов в секундах
+    status = Column(Enum(WorkDayStatusEnum), default=WorkDayStatusEnum.ACTIVE)
+    applications_processed = Column(Integer, default=0)  # Количество обработанных заявлений
+    breaks = relationship("WorkBreak", back_populates="work_day")
+
+class WorkBreak(Base):
+    __tablename__ = "work_breaks"
+    id = Column(Integer, primary_key=True)
+    work_day_id = Column(Integer, ForeignKey("work_days.id"), nullable=False)
+    work_day = relationship("WorkDay", back_populates="breaks")
+    start_time = Column(DateTime, nullable=False)  # Время начала перерыва
+    end_time = Column(DateTime, nullable=True)  # Время окончания перерыва
+    duration = Column(Integer, default=0)  # Продолжительность перерыва в секундах 

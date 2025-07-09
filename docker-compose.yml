@@ -15,7 +15,7 @@ services:
 
   bot:
     build: .
-    command: ["python", "bot.py"]
+    command: ["/app/start.sh"]
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
       DB_DSN: ${DB_DSN}

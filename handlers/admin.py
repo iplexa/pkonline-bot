@@ -3,13 +3,14 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from db.crud import (
-    add_employee, remove_employee, add_group_to_employee, remove_group_from_employee, list_employees_with_groups, is_admin, get_employee_by_tg_id, get_applications_by_queue_type, clear_queue_by_type, import_applications_from_excel
+    add_employee, remove_employee, add_group_to_employee, remove_group_from_employee, list_employees_with_groups, is_admin, get_employee_by_tg_id, get_applications_by_queue_type, clear_queue_by_type, import_applications_from_excel, get_all_work_days_report
 )
-from keyboards.admin import admin_main_menu_keyboard, admin_staff_menu_keyboard, admin_queue_menu_keyboard, admin_queue_type_keyboard, admin_queue_pagination_keyboard, group_choice_keyboard
+from keyboards.admin import admin_main_menu_keyboard, admin_staff_menu_keyboard, admin_queue_menu_keyboard, admin_queue_type_keyboard, admin_queue_pagination_keyboard, group_choice_keyboard, admin_reports_menu_keyboard
 from keyboards.main import main_menu_keyboard
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from db.crud import Application, ApplicationStatusEnum
+from datetime import date, datetime
 
 router = Router()
 
@@ -361,4 +362,194 @@ async def admin_upload_queue_file(message: Message, state: FSMContext):
 @router.callback_query(F.data == "admin_queue_menu")
 async def admin_queue_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text("Управление очередями:", reply_markup=admin_queue_menu_keyboard()) 
+    await callback.message.edit_text("Управление очередями:", reply_markup=admin_queue_menu_keyboard())
+
+@router.callback_query(F.data == "admin_reports_menu")
+async def admin_reports_menu(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    await state.clear()
+    await callback.message.edit_text("Отчеты:", reply_markup=admin_reports_menu_keyboard())
+
+@router.callback_query(F.data == "admin_full_report")
+async def admin_full_report(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    # Получаем отчет за сегодня
+    reports = await get_all_work_days_report()
+    
+    if not reports:
+        await callback.message.edit_text(
+            "Нет данных за сегодня.",
+            reply_markup=admin_reports_menu_keyboard()
+        )
+        return
+    
+    # Формируем полный отчет
+    report_text = f"📊 ПОЛНЫЙ ОТЧЕТ за {date.today().strftime('%d.%m.%Y')}\n\n"
+    
+    total_applications = 0
+    total_work_time = 0
+    total_break_time = 0
+    
+    for report in reports:
+        work_time_str = f"{report['total_work_time'] // 3600:02d}:{(report['total_work_time'] % 3600) // 60:02d}"
+        break_time_str = f"{report['total_break_time'] // 3600:02d}:{(report['total_break_time'] % 3600) // 60:02d}"
+        
+        report_text += f"👤 {report['employee_fio']}\n"
+        if report['start_time']:
+            report_text += f"   Начало: {report['start_time'].strftime('%H:%M')}\n"
+        if report['end_time']:
+            report_text += f"   Окончание: {report['end_time'].strftime('%H:%M')}\n"
+        report_text += f"   Время работы: {work_time_str}\n"
+        report_text += f"   Время перерывов: {break_time_str}\n"
+        report_text += f"   Заявлений: {report['applications_processed']}\n"
+        
+        if report['breaks']:
+            report_text += "   Перерывы:\n"
+            for i, break_item in enumerate(report['breaks'], 1):
+                start_time = break_item['start_time'].strftime('%H:%M')
+                if break_item['end_time']:
+                    end_time = break_item['end_time'].strftime('%H:%M')
+                    duration = break_item['duration'] // 60
+                    report_text += f"     {i}. {start_time} - {end_time} ({duration} мин)\n"
+                else:
+                    report_text += f"     {i}. {start_time} - активен\n"
+        
+        report_text += "\n"
+        
+        total_applications += report['applications_processed']
+        total_work_time += report['total_work_time']
+        total_break_time += report['total_break_time']
+    
+    # Итоги
+    total_work_time_str = f"{total_work_time // 3600:02d}:{(total_work_time % 3600) // 60:02d}"
+    total_break_time_str = f"{total_break_time // 3600:02d}:{(total_break_time % 3600) // 60:02d}"
+    
+    report_text += f"📈 ИТОГО:\n"
+    report_text += f"   Обработано заявлений: {total_applications}\n"
+    report_text += f"   Общее время работы: {total_work_time_str}\n"
+    report_text += f"   Общее время перерывов: {total_break_time_str}\n"
+    
+    # Разбиваем на части, если отчет слишком длинный
+    if len(report_text) > 4000:
+        parts = [report_text[i:i+4000] for i in range(0, len(report_text), 4000)]
+        for i, part in enumerate(parts):
+            if i == 0:
+                await callback.message.edit_text(part)
+            else:
+                await callback.message.answer(part)
+        await callback.message.answer("Отчет завершен.", reply_markup=admin_reports_menu_keyboard())
+    else:
+        await callback.message.edit_text(report_text, reply_markup=admin_reports_menu_keyboard())
+
+@router.callback_query(F.data == "admin_work_time_report")
+async def admin_work_time_report(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    # Получаем отчет за сегодня
+    reports = await get_all_work_days_report()
+    
+    if not reports:
+        await callback.message.edit_text(
+            "Нет данных о рабочем времени за сегодня.",
+            reply_markup=admin_reports_menu_keyboard()
+        )
+        return
+    
+    # Формируем отчет только по рабочему времени
+    report_text = f"⏰ ОТЧЕТ ПО РАБОЧЕМУ ВРЕМЕНИ за {date.today().strftime('%d.%m.%Y')}\n\n"
+    
+    total_work_time = 0
+    total_break_time = 0
+    
+    for report in reports:
+        work_time_str = f"{report['total_work_time'] // 3600:02d}:{(report['total_work_time'] % 3600) // 60:02d}"
+        break_time_str = f"{report['total_break_time'] // 3600:02d}:{(report['total_break_time'] % 3600) // 60:02d}"
+        
+        report_text += f"👤 {report['employee_fio']}\n"
+        if report['start_time']:
+            report_text += f"   Начало: {report['start_time'].strftime('%H:%M')}\n"
+        if report['end_time']:
+            report_text += f"   Окончание: {report['end_time'].strftime('%H:%M')}\n"
+        report_text += f"   Время работы: {work_time_str}\n"
+        report_text += f"   Время перерывов: {break_time_str}\n"
+        
+        if report['breaks']:
+            report_text += "   Перерывы:\n"
+            for i, break_item in enumerate(report['breaks'], 1):
+                start_time = break_item['start_time'].strftime('%H:%M')
+                if break_item['end_time']:
+                    end_time = break_item['end_time'].strftime('%H:%M')
+                    duration = break_item['duration'] // 60
+                    report_text += f"     {i}. {start_time} - {end_time} ({duration} мин)\n"
+                else:
+                    report_text += f"     {i}. {start_time} - активен\n"
+        
+        report_text += "\n"
+        
+        total_work_time += report['total_work_time']
+        total_break_time += report['total_break_time']
+    
+    # Итоги
+    total_work_time_str = f"{total_work_time // 3600:02d}:{(total_work_time % 3600) // 60:02d}"
+    total_break_time_str = f"{total_break_time // 3600:02d}:{(total_break_time % 3600) // 60:02d}"
+    
+    report_text += f"📈 ИТОГО:\n"
+    report_text += f"   Общее время работы: {total_work_time_str}\n"
+    report_text += f"   Общее время перерывов: {total_break_time_str}\n"
+    
+    # Разбиваем на части, если отчет слишком длинный
+    if len(report_text) > 4000:
+        parts = [report_text[i:i+4000] for i in range(0, len(report_text), 4000)]
+        for i, part in enumerate(parts):
+            if i == 0:
+                await callback.message.edit_text(part)
+            else:
+                await callback.message.answer(part)
+        await callback.message.answer("Отчет завершен.", reply_markup=admin_reports_menu_keyboard())
+    else:
+        await callback.message.edit_text(report_text, reply_markup=admin_reports_menu_keyboard())
+
+@router.callback_query(F.data == "admin_applications_report")
+async def admin_applications_report(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    # Получаем отчет за сегодня
+    reports = await get_all_work_days_report()
+    
+    if not reports:
+        await callback.message.edit_text(
+            "Нет данных о заявлениях за сегодня.",
+            reply_markup=admin_reports_menu_keyboard()
+        )
+        return
+    
+    # Формируем отчет только по заявлениям
+    report_text = f"📋 ОТЧЕТ ПО ЗАЯВЛЕНИЯМ за {date.today().strftime('%d.%m.%Y')}\n\n"
+    
+    total_applications = 0
+    
+    for report in reports:
+        if report['applications_processed'] > 0:  # Показываем только тех, кто обрабатывал заявления
+            report_text += f"👤 {report['employee_fio']}\n"
+            report_text += f"   Обработано заявлений: {report['applications_processed']}\n"
+            if report['start_time']:
+                report_text += f"   Начало работы: {report['start_time'].strftime('%H:%M')}\n"
+            if report['end_time']:
+                report_text += f"   Окончание работы: {report['end_time'].strftime('%H:%M')}\n"
+            report_text += "\n"
+        
+        total_applications += report['applications_processed']
+    
+    # Итоги
+    report_text += f"📈 ИТОГО:\n"
+    report_text += f"   Обработано заявлений: {total_applications}\n"
+    
+    if total_applications == 0:
+        report_text += "   Сегодня заявления не обрабатывались"
+    
+    await callback.message.edit_text(report_text, reply_markup=admin_reports_menu_keyboard()) 

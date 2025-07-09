@@ -1,10 +1,15 @@
 from logging.config import fileConfig
 import os
+import sys
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
+
+# Добавляем путь к проекту в sys.path
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
 from db.models import Base
 
 # this is the Alembic Config object, which provides
@@ -41,6 +46,10 @@ def run_migrations_offline() -> None:
 
     """
     url = os.environ.get("DB_DSN") or config.get_main_option("sqlalchemy.url")
+    # Заменяем asyncpg на psycopg2 для миграций
+    if url and "asyncpg" in url:
+        url = url.replace("asyncpg", "psycopg2")
+    
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -60,6 +69,10 @@ def run_migrations_online() -> None:
 
     """
     url = os.environ.get("DB_DSN") or config.get_main_option("sqlalchemy.url")
+    # Заменяем asyncpg на psycopg2 для миграций
+    if url and "asyncpg" in url:
+        url = url.replace("asyncpg", "psycopg2")
+    
     connectable = engine_from_config(
         {**config.get_section(config.config_ini_section, {}), "sqlalchemy.url": url},
         prefix="sqlalchemy.",

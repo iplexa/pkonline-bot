@@ -1,11 +1,28 @@
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
-from .models import Application, ApplicationStatusEnum, Employee, Group
-from datetime import datetime, timedelta
+from .models import Application, ApplicationStatusEnum, Employee, Group, WorkDay, WorkBreak, WorkDayStatusEnum
+from datetime import datetime, timedelta, date
 from .session import get_session
 import aiohttp
 import tempfile
 from utils.excel import parse_lk_applications_from_excel
+import pytz
+import logging
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Московский часовой пояс
+MSK_TZ = pytz.timezone('Europe/Moscow')
+
+def get_moscow_now():
+    """Получить текущее время в московском часовом поясе"""
+    return datetime.now(MSK_TZ).replace(tzinfo=None)
+
+def get_moscow_date():
+    """Получить текущую дату в московском часовом поясе"""
+    return get_moscow_now().date()
 
 async def cleanup_expired_applications():
     """Возвращает в очередь заявления, которые в обработке больше часа"""
@@ -251,4 +268,241 @@ async def return_application_to_queue(app_id: int):
             taken_at=None
         )
         await session.execute(stmt)
-        await session.commit() 
+        await session.commit()
+
+async def get_current_work_day(employee_id: int):
+    """Получить текущий рабочий день сотрудника"""
+    async for session in get_session():
+        today = get_moscow_date()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_end = datetime.combine(today, datetime.max.time())
+        
+        stmt = select(WorkDay).where(
+            WorkDay.employee_id == employee_id,
+            WorkDay.date >= today_start,
+            WorkDay.date <= today_end
+        ).options(selectinload(WorkDay.breaks))
+        result = await session.execute(stmt)
+        work_day = result.scalars().first()
+        
+        return work_day
+
+async def start_work_day(employee_id: int):
+    """Начать рабочий день"""
+    async for session in get_session():
+        today = get_moscow_date()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_end = datetime.combine(today, datetime.max.time())
+        
+        # Проверяем, есть ли уже рабочий день на сегодня
+        stmt = select(WorkDay).where(
+            WorkDay.employee_id == employee_id,
+            WorkDay.date >= today_start,
+            WorkDay.date <= today_end
+        )
+        result = await session.execute(stmt)
+        existing_day = result.scalars().first()
+        
+        if existing_day:
+            return existing_day
+        
+        work_day = WorkDay(
+            employee_id=employee_id,
+            date=get_moscow_now(),  # Сохраняем полную дату и время
+            start_time=get_moscow_now(),
+            status=WorkDayStatusEnum.ACTIVE
+        )
+        session.add(work_day)
+        await session.commit()
+        return work_day
+
+async def end_work_day(employee_id: int):
+    """Завершить рабочий день"""
+    async for session in get_session():
+        work_day = await get_current_work_day(employee_id)
+        if not work_day:
+            return None
+        
+        work_day.end_time = get_moscow_now()
+        work_day.status = WorkDayStatusEnum.FINISHED
+        
+        # Завершаем активный перерыв, если есть
+        active_break = await get_active_break(work_day.id)
+        if active_break:
+            active_break.end_time = get_moscow_now()
+            active_break.duration = int((active_break.end_time - active_break.start_time).total_seconds())
+            work_day.total_break_time += active_break.duration
+        
+        # Обновляем общее время работы
+        if work_day.start_time:
+            total_work_seconds = int((work_day.end_time - work_day.start_time).total_seconds()) - work_day.total_break_time
+            work_day.total_work_time = max(0, total_work_seconds)
+        
+        await session.commit()
+        return work_day
+
+async def start_break(employee_id: int):
+    """Начать перерыв"""
+    async for session in get_session():
+        work_day = await get_current_work_day(employee_id)
+        if not work_day:
+            return None
+        
+        # Проверяем, нет ли уже активного перерыва
+        active_break = await get_active_break(work_day.id)
+        if active_break:
+            return None
+        
+        work_break = WorkBreak(
+            work_day_id=work_day.id,
+            start_time=get_moscow_now()
+        )
+        session.add(work_break)
+        await session.commit()
+        return work_break
+
+async def end_break(employee_id: int):
+    """Завершить перерыв"""
+    async for session in get_session():
+        work_day = await get_current_work_day(employee_id)
+        if not work_day:
+            return None
+        
+        active_break = await get_active_break(work_day.id)
+        if not active_break:
+            return None
+        
+        active_break.end_time = get_moscow_now()
+        active_break.duration = int((active_break.end_time - active_break.start_time).total_seconds())
+        work_day.total_break_time += active_break.duration
+        
+        await session.commit()
+        return active_break
+
+async def get_active_break(work_day_id: int):
+    """Получить активный перерыв для рабочего дня"""
+    async for session in get_session():
+        stmt = select(WorkBreak).where(
+            WorkBreak.work_day_id == work_day_id,
+            WorkBreak.end_time.is_(None)
+        )
+        result = await session.execute(stmt)
+        return result.scalars().first()
+
+async def increment_processed_applications(employee_id: int):
+    """Увеличить счетчик обработанных заявлений"""
+    async for session in get_session():
+        today = get_moscow_date()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_end = datetime.combine(today, datetime.max.time())
+        
+        logger.info(f"Увеличиваем счетчик для employee_id={employee_id}, дата={today}")
+        
+        # Получаем рабочий день в текущей сессии
+        stmt = select(WorkDay).where(
+            WorkDay.employee_id == employee_id,
+            WorkDay.date >= today_start,
+            WorkDay.date <= today_end
+        )
+        result = await session.execute(stmt)
+        work_day = result.scalars().first()
+        
+        if work_day:
+            old_count = work_day.applications_processed
+            work_day.applications_processed += 1
+            await session.commit()
+            logger.info(f"Счетчик увеличен: {old_count} -> {work_day.applications_processed} для work_day_id={work_day.id}")
+            return True
+        else:
+            # Если нет рабочего дня, создаем его автоматически
+            work_day = WorkDay(
+                employee_id=employee_id,
+                date=get_moscow_now(),
+                start_time=get_moscow_now(),
+                status=WorkDayStatusEnum.ACTIVE,
+                applications_processed=1  # Устанавливаем сразу 1
+            )
+            session.add(work_day)
+            await session.commit()
+            logger.info(f"Создан новый рабочий день с счетчиком=1 для employee_id={employee_id}, work_day_id={work_day.id}")
+            return True
+
+async def get_work_day_report(employee_id: int, report_date: date = None):
+    """Получить отчет по рабочему дню"""
+    async for session in get_session():
+        if not report_date:
+            report_date = get_moscow_date()
+        
+        today_start = datetime.combine(report_date, datetime.min.time())
+        today_end = datetime.combine(report_date, datetime.max.time())
+        
+        stmt = select(WorkDay).where(
+            WorkDay.employee_id == employee_id,
+            WorkDay.date >= today_start,
+            WorkDay.date <= today_end
+        ).options(selectinload(WorkDay.breaks))
+        result = await session.execute(stmt)
+        work_day = result.scalars().first()
+        
+        if not work_day:
+            return None
+        
+        return {
+            "employee_id": work_day.employee_id,
+            "date": work_day.date.date() if work_day.date else None,
+            "start_time": work_day.start_time,
+            "end_time": work_day.end_time,
+            "total_work_time": work_day.total_work_time,
+            "total_break_time": work_day.total_break_time,
+            "applications_processed": work_day.applications_processed,
+            "status": work_day.status.value,
+            "breaks": [
+                {
+                    "start_time": break_item.start_time,
+                    "end_time": break_item.end_time,
+                    "duration": break_item.duration
+                }
+                for break_item in work_day.breaks
+            ]
+        }
+
+async def get_all_work_days_report(report_date: date = None):
+    """Получить отчет по всем сотрудникам за день"""
+    async for session in get_session():
+        if not report_date:
+            report_date = get_moscow_date()
+        
+        today_start = datetime.combine(report_date, datetime.min.time())
+        today_end = datetime.combine(report_date, datetime.max.time())
+        
+        stmt = select(WorkDay).where(
+            WorkDay.date >= today_start,
+            WorkDay.date <= today_end
+        ).options(selectinload(WorkDay.employee), selectinload(WorkDay.breaks))
+        result = await session.execute(stmt)
+        work_days = result.scalars().all()
+        
+        reports = []
+        for work_day in work_days:
+            report = {
+                "employee_fio": work_day.employee.fio,
+                "employee_tg_id": work_day.employee.tg_id,
+                "date": work_day.date.date() if work_day.date else None,
+                "start_time": work_day.start_time,
+                "end_time": work_day.end_time,
+                "total_work_time": work_day.total_work_time,
+                "total_break_time": work_day.total_break_time,
+                "applications_processed": work_day.applications_processed,
+                "status": work_day.status.value,
+                "breaks": [
+                    {
+                        "start_time": break_item.start_time,
+                        "end_time": break_item.end_time,
+                        "duration": break_item.duration
+                    }
+                    for break_item in work_day.breaks
+                ]
+            }
+            reports.append(report)
+        
+        return reports 

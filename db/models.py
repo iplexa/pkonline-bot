@@ -6,6 +6,7 @@ Base = declarative_base()
 
 class ApplicationStatusEnum(enum.Enum):
     QUEUED = "queued"
+    IN_PROGRESS = "in_progress"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     PROBLEM = "problem"
@@ -21,6 +22,7 @@ class Application(Base):
     queue_type = Column(String, nullable=False)  # 'lk' или 'epgu'
     processed_by_id = Column(Integer, ForeignKey('employees.id'), nullable=True)
     processed_by = relationship("Employee", back_populates="applications")
+    taken_at = Column(DateTime, nullable=True)  # Время взятия в обработку
 
 class Group(Base):
     __tablename__ = "groups"

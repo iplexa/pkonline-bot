@@ -1,14 +1,71 @@
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 from .models import Application, ApplicationStatusEnum, Employee, Group
-from datetime import datetime
+from datetime import datetime, timedelta
 from .session import get_session
 import aiohttp
 import tempfile
 from utils.excel import parse_lk_applications_from_excel
 
-async def get_next_application(queue_type: str):
+async def cleanup_expired_applications():
+    """Возвращает в очередь заявления, которые в обработке больше часа"""
     async for session in get_session():
+        one_hour_ago = datetime.now() - timedelta(hours=1)
+        # Сначала получаем заявления, которые будут возвращены
+        expired_stmt = select(Application).where(
+            Application.status == ApplicationStatusEnum.IN_PROGRESS,
+            Application.taken_at < one_hour_ago
+        ).options(selectinload(Application.processed_by))
+        expired_result = await session.execute(expired_stmt)
+        expired_apps = expired_result.scalars().all()
+        
+        # Возвращаем заявления в очередь
+        stmt = update(Application).where(
+            Application.status == ApplicationStatusEnum.IN_PROGRESS,
+            Application.taken_at < one_hour_ago
+        ).values(
+            status=ApplicationStatusEnum.QUEUED,
+            processed_by_id=None,
+            taken_at=None
+        )
+        await session.execute(stmt)
+        await session.commit()
+        
+        # Возвращаем информацию о возвращённых заявлениях
+        return [
+            {
+                "app_id": app.id,
+                "fio": app.fio,
+                "queue_type": app.queue_type,
+                "employee_tg_id": app.processed_by.tg_id if app.processed_by else None,
+                "employee_fio": app.processed_by.fio if app.processed_by else None
+            }
+            for app in expired_apps
+        ]
+
+async def get_next_application(queue_type: str, employee_id: int = None, bot=None):
+    async for session in get_session():
+        # Сначала очищаем просроченные заявления
+        expired_apps = await cleanup_expired_applications()
+        
+        # Отправляем уведомления о возвращённых заявлениях
+        if expired_apps and bot:
+            from config import ADMIN_CHAT_ID
+            for app_info in expired_apps:
+                # Уведомление в админ-чат
+                admin_msg = f"⚠️ Заявление {app_info['app_id']} ({app_info['fio']}) возвращено в очередь {app_info['queue_type']} по истечении времени"
+                if app_info['employee_fio']:
+                    admin_msg += f"\nСотрудник: {app_info['employee_fio']}"
+                await bot.send_message(ADMIN_CHAT_ID, admin_msg)
+                
+                # Уведомление сотруднику
+                if app_info['employee_tg_id']:
+                    try:
+                        employee_msg = f"⚠️ Заявление {app_info['app_id']} ({app_info['fio']}) возвращено в очередь по истечении времени обработки (1 час)"
+                        await bot.send_message(app_info['employee_tg_id'], employee_msg)
+                    except Exception:
+                        pass  # Игнорируем ошибки отправки сотруднику
+        
         stmt = select(Application).where(
             Application.queue_type == queue_type,
             Application.status == ApplicationStatusEnum.QUEUED
@@ -17,7 +74,14 @@ async def get_next_application(queue_type: str):
             Application.submitted_at.asc()
         )
         result = await session.execute(stmt)
-        return result.scalars().first()
+        app = result.scalars().first()
+        if app and employee_id:
+            # Сразу блокируем заявление за сотрудником
+            app.status = ApplicationStatusEnum.IN_PROGRESS
+            app.processed_by_id = employee_id
+            app.taken_at = datetime.now()
+            await session.commit()
+        return app
 
 async def update_application_status(app_id: int, status: ApplicationStatusEnum, reason: str = None, employee_id: int = None):
     async for session in get_session():
@@ -177,4 +241,14 @@ async def import_applications_from_excel(document, queue_type: str):
                 status=ApplicationStatusEnum.QUEUED
             )
             session.add(new_app)
+        await session.commit()
+
+async def return_application_to_queue(app_id: int):
+    async for session in get_session():
+        stmt = update(Application).where(Application.id == app_id).values(
+            status=ApplicationStatusEnum.QUEUED,
+            processed_by_id=None,
+            taken_at=None
+        )
+        await session.execute(stmt)
         await session.commit() 

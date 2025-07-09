@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from db.crud import (
     add_employee, remove_employee, add_group_to_employee, remove_group_from_employee, list_employees_with_groups, is_admin, get_employee_by_tg_id, get_applications_by_queue_type, clear_queue_by_type, import_applications_from_excel
 )
-from keyboards.admin import admin_main_menu_keyboard, admin_staff_menu_keyboard, admin_queue_menu_keyboard, admin_queue_type_keyboard, admin_queue_pagination_keyboard
+from keyboards.admin import admin_main_menu_keyboard, admin_staff_menu_keyboard, admin_queue_menu_keyboard, admin_queue_type_keyboard, admin_queue_pagination_keyboard, group_choice_keyboard
 from keyboards.main import main_menu_keyboard
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
@@ -62,7 +62,7 @@ async def admin_add_employee(callback: CallbackQuery, state: FSMContext):
 async def admin_add_employee_tg_id(message: Message, state: FSMContext):
     if message.text.strip().lower() == "отмена":
         await state.clear()
-        await message.answer("Добавление отменено.", reply_markup=admin_menu_keyboard())
+        await message.answer("Добавление отменено.", reply_markup=admin_staff_menu_keyboard())
         return
     tg_id = message.text.strip()
     emp = await get_employee_by_tg_id(tg_id)
@@ -77,14 +77,14 @@ async def admin_add_employee_tg_id(message: Message, state: FSMContext):
 async def admin_add_employee_fio(message: Message, state: FSMContext):
     if message.text.strip().lower() == "отмена":
         await state.clear()
-        await message.answer("Добавление отменено.", reply_markup=admin_menu_keyboard())
+        await message.answer("Добавление отменено.", reply_markup=admin_staff_menu_keyboard())
         return
     data = await state.get_data()
     tg_id = data.get("tg_id")
     fio = message.text.strip()
     try:
         await add_employee(tg_id, fio)
-        await message.answer(f"Сотрудник {fio} ({tg_id}) добавлен.", reply_markup=admin_menu_keyboard())
+        await message.answer(f"Сотрудник {fio} ({tg_id}) добавлен.", reply_markup=admin_staff_menu_keyboard())
     except Exception as e:
         await message.answer(f"Ошибка при добавлении: {e}", reply_markup=cancel_keyboard)
     await state.clear()
@@ -98,7 +98,7 @@ async def admin_remove_employee(callback: CallbackQuery, state: FSMContext):
 async def admin_remove_employee_tg_id(message: Message, state: FSMContext):
     if message.text.strip().lower() == "отмена":
         await state.clear()
-        await message.answer("Удаление отменено.", reply_markup=admin_menu_keyboard())
+        await message.answer("Удаление отменено.", reply_markup=admin_staff_menu_keyboard())
         return
     tg_id = message.text.strip()
     emp = await get_employee_by_tg_id(tg_id)
@@ -107,7 +107,7 @@ async def admin_remove_employee_tg_id(message: Message, state: FSMContext):
         return
     try:
         await remove_employee(tg_id)
-        await message.answer(f"Сотрудник {tg_id} удалён.", reply_markup=admin_menu_keyboard())
+        await message.answer(f"Сотрудник {tg_id} удалён.", reply_markup=admin_staff_menu_keyboard())
     except Exception as e:
         await message.answer(f"Ошибка при удалении: {e}", reply_markup=cancel_keyboard)
     await state.clear()
@@ -116,7 +116,7 @@ async def admin_remove_employee_tg_id(message: Message, state: FSMContext):
 async def admin_add_group(callback: CallbackQuery, state: FSMContext):
     emps = await list_employees_with_groups()
     if not emps:
-        await callback.message.edit_text("Нет сотрудников для назначения группы.", reply_markup=admin_menu_keyboard())
+        await callback.message.edit_text("Нет сотрудников для назначения группы.", reply_markup=admin_staff_menu_keyboard())
         return
     builder = InlineKeyboardBuilder()
     for e in emps:
@@ -131,7 +131,7 @@ async def admin_add_group_choose_employee(callback: CallbackQuery, state: FSMCon
     tg_id = callback.data.replace("choose_emp_group_", "")
     emp = await get_employee_by_tg_id(tg_id)
     if not emp:
-        await callback.message.edit_text("Сотрудник не найден!", reply_markup=admin_menu_keyboard())
+        await callback.message.edit_text("Сотрудник не найден!", reply_markup=admin_staff_menu_keyboard())
         await state.clear()
         return
     groups = [g.name for g in emp.groups] if emp.groups else []
@@ -146,21 +146,21 @@ async def admin_add_group_choice(callback: CallbackQuery, state: FSMContext):
     group = callback.data.replace("group_", "")
     emp = await get_employee_by_tg_id(tg_id)
     if not emp:
-        await callback.message.edit_text("Сотрудник не найден!", reply_markup=admin_menu_keyboard())
+        await callback.message.edit_text("Сотрудник не найден!", reply_markup=admin_staff_menu_keyboard())
         await state.clear()
         return
     if group in [g.name for g in emp.groups]:
-        await callback.message.edit_text(f"У сотрудника уже есть группа {group}.", reply_markup=admin_menu_keyboard())
+        await callback.message.edit_text(f"У сотрудника уже есть группа {group}.", reply_markup=admin_staff_menu_keyboard())
         await state.clear()
         return
     try:
         result = await add_group_to_employee(tg_id, group)
         if not result:
-            await callback.message.edit_text(f"Не удалось добавить группу {group} сотруднику {tg_id}.", reply_markup=admin_menu_keyboard())
+            await callback.message.edit_text(f"Не удалось добавить группу {group} сотруднику {tg_id}.", reply_markup=admin_staff_menu_keyboard())
         else:
-            await callback.message.edit_text(f"Группа {group} добавлена сотруднику {tg_id}.", reply_markup=admin_menu_keyboard())
+            await callback.message.edit_text(f"Группа {group} добавлена сотруднику {tg_id}.", reply_markup=admin_staff_menu_keyboard())
     except Exception as e:
-        await callback.message.edit_text(f"Ошибка при добавлении группы: {e}", reply_markup=admin_menu_keyboard())
+        await callback.message.edit_text(f"Ошибка при добавлении группы: {e}", reply_markup=admin_staff_menu_keyboard())
     await state.clear()
 
 @router.callback_query(F.data == "admin_remove_group")
@@ -172,7 +172,7 @@ async def admin_remove_group(callback: CallbackQuery, state: FSMContext):
 async def admin_remove_group_tg_id(message: Message, state: FSMContext):
     if message.text.strip().lower() == "отмена":
         await state.clear()
-        await message.answer("Удаление группы отменено.", reply_markup=admin_menu_keyboard())
+        await message.answer("Удаление группы отменено.", reply_markup=admin_staff_menu_keyboard())
         return
     tg_id = message.text.strip()
     emp = await get_employee_by_tg_id(tg_id)
@@ -181,7 +181,7 @@ async def admin_remove_group_tg_id(message: Message, state: FSMContext):
         return
     groups = [g.name for g in emp.groups] if emp.groups else []
     if not groups:
-        await message.answer("У сотрудника нет групп для удаления.", reply_markup=admin_menu_keyboard())
+        await message.answer("У сотрудника нет групп для удаления.", reply_markup=admin_staff_menu_keyboard())
         await state.clear()
         return
     await state.update_data(tg_id=tg_id)
@@ -195,18 +195,18 @@ async def admin_remove_group_choice(callback: CallbackQuery, state: FSMContext):
     group = callback.data.replace("group_", "")
     emp = await get_employee_by_tg_id(tg_id)
     if not emp:
-        await callback.message.edit_text("Сотрудник не найден!", reply_markup=admin_menu_keyboard())
+        await callback.message.edit_text("Сотрудник не найден!", reply_markup=admin_staff_menu_keyboard())
         await state.clear()
         return
     if group not in [g.name for g in emp.groups]:
-        await callback.message.edit_text(f"У сотрудника нет группы {group}.", reply_markup=admin_menu_keyboard())
+        await callback.message.edit_text(f"У сотрудника нет группы {group}.", reply_markup=admin_staff_menu_keyboard())
         await state.clear()
         return
     try:
         await remove_group_from_employee(tg_id, group)
-        await callback.message.edit_text(f"Группа {group} удалена у сотрудника {tg_id}.", reply_markup=admin_menu_keyboard())
+        await callback.message.edit_text(f"Группа {group} удалена у сотрудника {tg_id}.", reply_markup=admin_staff_menu_keyboard())
     except Exception as e:
-        await callback.message.edit_text(f"Ошибка при удалении группы: {e}", reply_markup=admin_menu_keyboard())
+        await callback.message.edit_text(f"Ошибка при удалении группы: {e}", reply_markup=admin_staff_menu_keyboard())
     await state.clear()
 
 @router.callback_query(F.data == "admin_list_employees")
@@ -219,7 +219,7 @@ async def admin_list_employees(callback: CallbackQuery, state: FSMContext):
         for e in emps:
             text += f"\n<b>{e['fio']}</b> (<code>{e['tg_id']}</code>) {'[admin]' if e['is_admin'] else ''}\n"
             text += f"Группы: {', '.join(e['groups']) if e['groups'] else 'нет'}\n"
-    await callback.message.edit_text(text, reply_markup=admin_menu_keyboard(), parse_mode="HTML")
+    await callback.message.edit_text(text, reply_markup=admin_staff_menu_keyboard(), parse_mode="HTML")
     await state.clear()
 
 @router.callback_query(F.data == "admin_view_queue")

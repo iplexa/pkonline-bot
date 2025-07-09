@@ -3,7 +3,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery
-from db.crud import get_next_application, update_application_status, get_employee_by_tg_id, employee_has_group
+from db.crud import get_next_application, update_application_status, get_employee_by_tg_id, employee_has_group, return_application_to_queue
 from db.models import ApplicationStatusEnum
 from keyboards.lk import lk_queue_keyboard, lk_decision_keyboard
 from keyboards.main import main_menu_keyboard
@@ -32,7 +32,7 @@ async def get_lk_application(callback: CallbackQuery, state: FSMContext):
     emp = await get_employee_by_tg_id(str(callback.from_user.id))
     if not emp or not await employee_has_group(str(callback.from_user.id), "lk"):
         return
-    app = await get_next_application(queue_type="lk")
+    app = await get_next_application(queue_type="lk", employee_id=emp.id, bot=callback.bot)
     if not app:
         await callback.message.edit_text("Очередь пуста.", reply_markup=lk_queue_keyboard(menu=True))
         return
@@ -54,6 +54,7 @@ async def process_lk_decision(callback: CallbackQuery, state: FSMContext):
         await callback.bot.send_message(ADMIN_CHAT_ID, f"ЛК: {callback.from_user.full_name} принял заявление {app_id}")
         await state.clear()
     elif callback.data == "return_lk":
+        await return_application_to_queue(app_id)
         await callback.message.edit_text("Заявление возвращено в очередь.", reply_markup=lk_queue_keyboard(menu=True))
         await state.clear()
     elif callback.data in ["reject_lk", "problem_lk"]:

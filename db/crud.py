@@ -3,6 +3,9 @@ from sqlalchemy.orm import selectinload
 from .models import Application, ApplicationStatusEnum, Employee, Group
 from datetime import datetime
 from .session import get_session
+import aiohttp
+import tempfile
+from utils.excel import parse_lk_applications_from_excel
 
 async def get_next_application(queue_type: str):
     async for session in get_session():
@@ -127,4 +130,51 @@ async def list_employees_with_groups():
                 "groups": [g.name for g in e.groups]
             }
             for e in employees
-        ] 
+        ]
+
+async def get_applications_by_queue_type(queue_type: str):
+    async for session in get_session():
+        stmt = select(Application).where(Application.queue_type == queue_type).order_by(Application.submitted_at.asc())
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+async def clear_queue_by_type(queue_type: str):
+    async for session in get_session():
+        await session.execute(
+            Application.__table__.delete().where(Application.queue_type == queue_type)
+        )
+        await session.commit()
+
+async def import_applications_from_excel(document, queue_type: str):
+    file = await document.download(destination_dir=None)
+    import os
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+        tmp.write(file.getvalue())
+        tmp_path = tmp.name
+    if queue_type == "lk":
+        applications = parse_lk_applications_from_excel(tmp_path)
+    else:
+        applications = []  # Для других очередей можно реализовать аналогично
+    os.unlink(tmp_path)
+    async for session in get_session():
+        # Получить все ФИО уже в очереди с этим типом и статусом QUEUED
+        existing = await session.execute(
+            select(Application.fio).where(
+                Application.queue_type == queue_type,
+                Application.status == ApplicationStatusEnum.QUEUED
+            )
+        )
+        existing_fios = set(fio for (fio,) in existing.fetchall())
+        for app in applications:
+            if app["fio"] in existing_fios:
+                continue
+            new_app = Application(
+                fio=app["fio"],
+                submitted_at=app["submitted_at"],
+                queue_type=queue_type,
+                is_priority=app.get("priority", False),
+                status=ApplicationStatusEnum.QUEUED
+            )
+            session.add(new_app)
+        await session.commit() 

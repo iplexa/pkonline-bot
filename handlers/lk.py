@@ -47,7 +47,7 @@ async def process_lk_decision(callback: CallbackQuery, state: FSMContext):
         return
     data = await state.get_data()
     app_id = data.get("app_id")
-    employee_id = callback.from_user.id
+    employee_id = emp.id if emp else None
     if callback.data == "accept_lk":
         await update_application_status(app_id, ApplicationStatusEnum.ACCEPTED, employee_id=employee_id)
         await callback.message.edit_text("Заявление принято.", reply_markup=lk_queue_keyboard(menu=True))
@@ -69,7 +69,7 @@ async def process_lk_reason(message: Message, state: FSMContext):
     data = await state.get_data()
     app_id = data.get("app_id")
     decision = data.get("decision")
-    employee_id = message.from_user.id
+    employee_id = emp.id if emp else None
     reason = message.text
     status = ApplicationStatusEnum.REJECTED if decision == "reject_lk" else ApplicationStatusEnum.PROBLEM
     await update_application_status(app_id, status, reason=reason, employee_id=employee_id)

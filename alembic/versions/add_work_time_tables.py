@@ -51,10 +51,17 @@ def upgrade() -> None:
     # Явно создаем ENUM для problem_status
     problem_status_enum = sa.Enum('NEW', 'IN_PROGRESS', 'SOLVED', 'SOLVED_RETURN', name='problemstatusenum')
     problem_status_enum.create(op.get_bind(), checkfirst=True)
+    
+    # Проверяем, существуют ли колонки перед добавлением
+    existing_columns = [col['name'] for col in inspector.get_columns('applications')]
+    
     with op.batch_alter_table('applications') as batch_op:
-        batch_op.add_column(sa.Column('problem_status', problem_status_enum, nullable=True))
-        batch_op.add_column(sa.Column('problem_comment', sa.Text(), nullable=True))
-        batch_op.add_column(sa.Column('problem_responsible', sa.String(), nullable=True))
+        if 'problem_status' not in existing_columns:
+            batch_op.add_column(sa.Column('problem_status', problem_status_enum, nullable=True))
+        if 'problem_comment' not in existing_columns:
+            batch_op.add_column(sa.Column('problem_comment', sa.Text(), nullable=True))
+        if 'problem_responsible' not in existing_columns:
+            batch_op.add_column(sa.Column('problem_responsible', sa.String(), nullable=True))
 
 
 def downgrade() -> None:

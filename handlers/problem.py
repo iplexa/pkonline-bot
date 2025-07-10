@@ -6,7 +6,7 @@ from aiogram.types import Message, CallbackQuery
 from db.crud import (
     get_problem_applications,
     get_employee_by_tg_id,
-    employee_has_group,
+    has_access,
     update_problem_status,
     get_application_by_id
 )
@@ -27,7 +27,7 @@ class ProblemStates(StatesGroup):
 @router.callback_query(F.data == "problem_menu")
 async def problem_menu_entry(callback: CallbackQuery, state: FSMContext):
     emp = await get_employee_by_tg_id(str(callback.from_user.id))
-    if not emp or not await employee_has_group(str(callback.from_user.id), "problem"):
+    if not emp or not await has_access(str(callback.from_user.id), "problem"):
         return
     await state.set_state(ProblemStates.waiting_queue_type)
     await callback.message.edit_text(

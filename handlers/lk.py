@@ -3,7 +3,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery
-from db.crud import get_next_application, update_application_status, get_employee_by_tg_id, employee_has_group, return_application_to_queue, increment_processed_applications
+from db.crud import get_next_application, update_application_status, get_employee_by_tg_id, has_access, return_application_to_queue, increment_processed_applications
 from db.models import ApplicationStatusEnum
 from keyboards.lk import lk_queue_keyboard, lk_decision_keyboard, lk_reason_keyboard
 from keyboards.main import main_menu_keyboard
@@ -22,7 +22,7 @@ class LKStates(StatesGroup):
 async def lk_menu_entry(callback: CallbackQuery, state: FSMContext):
     try:
         emp = await get_employee_by_tg_id(str(callback.from_user.id))
-        if not emp or not await employee_has_group(str(callback.from_user.id), "lk"):
+        if not emp or not await has_access(str(callback.from_user.id), "lk"):
             return
         await callback.message.edit_text("Очередь ЛК. Нажмите кнопку, чтобы получить заявление.", reply_markup=lk_queue_keyboard(menu=True))
     except Exception as e:
@@ -33,7 +33,7 @@ async def lk_menu_entry(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "get_lk_application")
 async def get_lk_application(callback: CallbackQuery, state: FSMContext):
     emp = await get_employee_by_tg_id(str(callback.from_user.id))
-    if not emp or not await employee_has_group(str(callback.from_user.id), "lk"):
+    if not emp or not await has_access(str(callback.from_user.id), "lk"):
         return
     app = await get_next_application(queue_type="lk", employee_id=emp.id, bot=callback.bot)
     if not app:
@@ -46,7 +46,7 @@ async def get_lk_application(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(LKStates.waiting_decision, F.data.in_(["accept_lk", "reject_lk", "problem_lk", "return_lk"]))
 async def process_lk_decision(callback: CallbackQuery, state: FSMContext):
     emp = await get_employee_by_tg_id(str(callback.from_user.id))
-    if not emp or not await employee_has_group(str(callback.from_user.id), "lk"):
+    if not emp or not await has_access(str(callback.from_user.id), "lk"):
         return
     data = await state.get_data()
     app_id = data.get("app_id")
@@ -90,7 +90,7 @@ async def cancel_lk_reason(callback: CallbackQuery, state: FSMContext):
 @router.message(LKStates.waiting_reason)
 async def process_lk_reason(message: Message, state: FSMContext):
     emp = await get_employee_by_tg_id(str(message.from_user.id))
-    if not emp or not await employee_has_group(str(message.from_user.id), "lk"):
+    if not emp or not await has_access(str(message.from_user.id), "lk"):
         return
     data = await state.get_data()
     app_id = data.get("app_id")

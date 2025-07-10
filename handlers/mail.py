@@ -7,7 +7,7 @@ from db.crud import (
     get_applications_by_fio_and_queue,
     update_application_status,
     get_employee_by_tg_id, 
-    employee_has_group, 
+    has_access, 
     increment_processed_applications
 )
 from db.models import ApplicationStatusEnum
@@ -29,7 +29,7 @@ class MailStates(StatesGroup):
 async def mail_menu_entry(callback: CallbackQuery, state: FSMContext):
     try:
         emp = await get_employee_by_tg_id(str(callback.from_user.id))
-        if not emp or not await employee_has_group(str(callback.from_user.id), "mail"):
+        if not emp or not await has_access(str(callback.from_user.id), "mail"):
             return
         await callback.message.edit_text(
             "📮 Очередь почты. Здесь подтверждается подпись документов.\n\n"
@@ -44,7 +44,7 @@ async def mail_menu_entry(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "mail_search_fio")
 async def mail_search_fio_start(callback: CallbackQuery, state: FSMContext):
     emp = await get_employee_by_tg_id(str(callback.from_user.id))
-    if not emp or not await employee_has_group(str(callback.from_user.id), "mail"):
+    if not emp or not await has_access(str(callback.from_user.id), "mail"):
         return
     await state.set_state(MailStates.waiting_fio_search)
     await callback.message.edit_text(
@@ -55,7 +55,7 @@ async def mail_search_fio_start(callback: CallbackQuery, state: FSMContext):
 @router.message(MailStates.waiting_fio_search)
 async def mail_search_fio_process(message: Message, state: FSMContext):
     emp = await get_employee_by_tg_id(str(message.from_user.id))
-    if not emp or not await employee_has_group(str(message.from_user.id), "mail"):
+    if not emp or not await has_access(str(message.from_user.id), "mail"):
         return
     fio = message.text.strip()
     if not fio:
@@ -112,7 +112,7 @@ async def mail_search_fio_process(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("mail_select_"))
 async def mail_select_callback(callback: CallbackQuery, state: FSMContext):
     emp = await get_employee_by_tg_id(str(callback.from_user.id))
-    if not emp or not await employee_has_group(str(callback.from_user.id), "mail"):
+    if not emp or not await has_access(str(callback.from_user.id), "mail"):
         return
     app_id = int(callback.data.replace("mail_select_", ""))
     data = await state.get_data()
@@ -136,7 +136,7 @@ async def mail_select_callback(callback: CallbackQuery, state: FSMContext):
 @router.message(MailStates.waiting_confirm)
 async def mail_confirm_process(message: Message, state: FSMContext):
     emp = await get_employee_by_tg_id(str(message.from_user.id))
-    if not emp or not await employee_has_group(str(message.from_user.id), "mail"):
+    if not emp or not await has_access(str(message.from_user.id), "mail"):
         return
     
     data = await state.get_data()
@@ -199,7 +199,7 @@ async def mail_back_to_menu(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "mail_confirm_yes")
 async def mail_confirm_yes_callback(callback: CallbackQuery, state: FSMContext):
     emp = await get_employee_by_tg_id(str(callback.from_user.id))
-    if not emp or not await employee_has_group(str(callback.from_user.id), "mail"):
+    if not emp or not await has_access(str(callback.from_user.id), "mail"):
         return
     data = await state.get_data()
     app_id = data.get("app_id")
@@ -223,7 +223,7 @@ async def mail_confirm_yes_callback(callback: CallbackQuery, state: FSMContext):
 @router.message(Command("mailinfo"))
 async def mail_info_handler(message: Message):
     emp = await get_employee_by_tg_id(str(message.from_user.id))
-    if not emp or not await employee_has_group(str(message.from_user.id), "mail"):
+    if not emp or not await has_access(str(message.from_user.id), "mail"):
         return
     args = message.text.split(maxsplit=1)
     if len(args) < 2:

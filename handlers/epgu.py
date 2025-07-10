@@ -9,7 +9,7 @@ from db.crud import (
     update_application_queue_type,
     postpone_application,
     get_employee_by_tg_id, 
-    employee_has_group, 
+    has_access, 
     return_application_to_queue, 
     increment_processed_applications
 )
@@ -31,7 +31,7 @@ class EPGUStates(StatesGroup):
 async def epgu_menu_entry(callback: CallbackQuery, state: FSMContext):
     try:
         emp = await get_employee_by_tg_id(str(callback.from_user.id))
-        if not emp or not await employee_has_group(str(callback.from_user.id), "epgu"):
+        if not emp or not await has_access(str(callback.from_user.id), "epgu"):
             return
         await callback.message.edit_text("Очередь ЕПГУ. Нажмите кнопку, чтобы получить заявление.", reply_markup=epgu_queue_keyboard(menu=True))
     except Exception as e:
@@ -42,7 +42,7 @@ async def epgu_menu_entry(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "get_epgu_application")
 async def get_epgu_application(callback: CallbackQuery, state: FSMContext):
     emp = await get_employee_by_tg_id(str(callback.from_user.id))
-    if not emp or not await employee_has_group(str(callback.from_user.id), "epgu"):
+    if not emp or not await has_access(str(callback.from_user.id), "epgu"):
         return
     app = await get_next_epgu_application(employee_id=emp.id, bot=callback.bot)
     if not app:
@@ -55,7 +55,7 @@ async def get_epgu_application(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(EPGUStates.waiting_decision, F.data.in_(["accept_epgu", "accept_mail_epgu", "no_call_epgu", "problem_epgu", "return_epgu"]))
 async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
     emp = await get_employee_by_tg_id(str(callback.from_user.id))
-    if not emp or not await employee_has_group(str(callback.from_user.id), "epgu"):
+    if not emp or not await has_access(str(callback.from_user.id), "epgu"):
         return
     data = await state.get_data()
     app_id = data.get("app_id")
@@ -121,7 +121,7 @@ async def cancel_epgu_reason(callback: CallbackQuery, state: FSMContext):
 @router.message(EPGUStates.waiting_reason)
 async def process_epgu_reason(message: Message, state: FSMContext):
     emp = await get_employee_by_tg_id(str(message.from_user.id))
-    if not emp or not await employee_has_group(str(message.from_user.id), "epgu"):
+    if not emp or not await has_access(str(message.from_user.id), "epgu"):
         return
     data = await state.get_data()
     app_id = data.get("app_id")

@@ -135,7 +135,7 @@ async def find_application_by_fio(fio: str, queue_type: str):
         result = await session.execute(stmt)
         return result.scalars().all()
 
-async def get_employee_by_tg_id(tg_id):
+async def get_employee_by_tg_id(tg_id: str):
     async for session in get_session():
         stmt = select(Employee).where(Employee.tg_id == str(tg_id)).options(selectinload(Employee.groups))
         result = await session.execute(stmt)
@@ -153,6 +153,24 @@ async def employee_has_group(tg_id: str, group_name: str):
 async def is_admin(tg_id: str):
     emp = await get_employee_by_tg_id(tg_id)
     return emp.is_admin if emp else False
+
+async def has_access(tg_id: str, group_name: str):
+    """
+    Проверяет, есть ли у пользователя доступ к группе.
+    Админы имеют доступ ко всем группам.
+    """
+    emp = await get_employee_by_tg_id(tg_id)
+    if not emp:
+        return False
+    
+    # Админы имеют доступ ко всем группам
+    if emp.is_admin:
+        return True
+    
+    # Обычные пользователи проверяются по группам
+    if not emp.groups:
+        return False
+    return any(g.name == group_name for g in emp.groups)
 
 async def add_employee(tg_id: str, fio: str, is_admin_flag: bool = False):
     async for session in get_session():

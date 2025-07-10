@@ -18,7 +18,7 @@ async def create_tables():
 async def ensure_admin():
     admin = await get_employee_by_tg_id(str(ADMIN_USER_ID))
     if not admin:
-        await add_employee(str(ADMIN_USER_ID), "Admin", is_admin_flag=True)
+        await add_employee(str(ADMIN_USER_ID), "Администратор", is_admin_flag=True)
 
 async def main():
     bot = Bot(token=BOT_TOKEN)
@@ -36,9 +36,7 @@ async def main():
     await create_tables()
     
     # Добавляем админа если его нет
-    admin_emp = await get_employee_by_tg_id(ADMIN_USER_ID)
-    if not admin_emp:
-        await add_employee(ADMIN_USER_ID, "Администратор")
+    await ensure_admin()
     
     # Запускаем бота
     await dp.start_polling(bot)

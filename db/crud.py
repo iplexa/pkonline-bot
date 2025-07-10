@@ -685,7 +685,7 @@ async def get_problem_applications(queue_type: str):
 
 async def get_application_by_id(app_id: int):
     async for session in get_session():
-        stmt = select(Application).where(Application.id == app_id)
+        stmt = select(Application).where(Application.id == app_id).options(selectinload(Application.processed_by))
         result = await session.execute(stmt)
         return result.scalars().first()
 

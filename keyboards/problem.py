@@ -11,9 +11,10 @@ def problem_menu_keyboard():
 def problem_list_keyboard(problems):
     buttons = []
     for app in problems:
-        text = f"{app.fio} | {app.submitted_at.strftime('%d.%m.%Y %H:%M')} | {app.problem_status.value if app.problem_status else 'новое'}"
-        if app.problem_comment:
-            text += f" | {app.problem_comment[:20]}..."
+        reason = (app.status_reason or '-')
+        if len(reason) > 40:
+            reason = reason[:37] + '...'
+        text = f"{app.fio} | {app.submitted_at.strftime('%d.%m.%Y %H:%M')} | {app.problem_status.value if app.problem_status else 'новое'} | {reason}"
         buttons.append([InlineKeyboardButton(text=text, callback_data=f"problem_app_{app.id}")])
     buttons.append([InlineKeyboardButton(text="Назад", callback_data="problem_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

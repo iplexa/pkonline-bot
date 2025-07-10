@@ -44,7 +44,6 @@ async def problem_queue_list(callback: CallbackQuery, state: FSMContext):
             f"В очереди {queue_type} нет проблемных дел.",
             reply_markup=problem_menu_keyboard()
         )
-        await state.clear()
         return
     await state.update_data(queue_type=queue_type)
     await state.set_state(ProblemStates.waiting_action)
@@ -67,9 +66,9 @@ async def problem_app_action(callback: CallbackQuery, state: FSMContext):
     text += f"ФИО: {app.fio}\n"
     text += f"Дата: {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
     text += f"Причина: {app.status_reason or '-'}\n"
+    text += f"Описание проблемы: {app.problem_comment or '-'}\n"
     text += f"Отправил: {app.processed_by.fio if app.processed_by else '-'}\n"
     text += f"Статус: {app.problem_status or 'новое'}\n"
-    text += f"Комментарий: {app.problem_comment or '-'}\n"
     text += f"Ответственный: {app.problem_responsible or '-'}\n"
     await callback.message.edit_text(
         text,
@@ -86,16 +85,19 @@ async def problem_action(callback: CallbackQuery, state: FSMContext):
         await update_problem_status(app_id, "solved")
         await callback.message.edit_text("✅ Дело отмечено как решенное и отправлено как принятое.", reply_markup=problem_menu_keyboard())
         await state.clear()
+        await problem_menu_entry(callback, state)
     elif action == "solved_return":
         await update_problem_status(app_id, "solved_return")
         await callback.message.edit_text("✅ Дело отмечено как решенное и возвращено в очередь.", reply_markup=problem_menu_keyboard())
         await state.clear()
+        await problem_menu_entry(callback, state)
     elif action == "in_progress":
         await state.set_state(ProblemStates.waiting_comment)
         await callback.message.edit_text("Введите комментарий по процессу решения:", reply_markup=problem_status_keyboard())
     elif action == "cancel":
         await callback.message.edit_text("Дело осталось в проблемных.", reply_markup=problem_menu_keyboard())
         await state.clear()
+        await problem_menu_entry(callback, state)
 
 @router.message(ProblemStates.waiting_comment)
 async def problem_comment(message: Message, state: FSMContext):

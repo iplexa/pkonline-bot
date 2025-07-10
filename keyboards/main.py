@@ -8,6 +8,9 @@ def main_menu_keyboard(is_admin=False, groups=None, with_menu_button=False):
     # Кнопка управления рабочим временем для всех пользователей
     buttons.append([InlineKeyboardButton(text="⏰ Рабочее время", callback_data="work_time_menu")])
     
+    # Кнопка Инфо по ФИО для всех
+    buttons.append([InlineKeyboardButton(text="🔎 Инфо по ФИО", callback_data="mail_info_fio")])
+    
     if is_admin:
         buttons.append([InlineKeyboardButton(text="📋 ЛК", callback_data="lk_menu")])
         buttons.append([InlineKeyboardButton(text="🏛️ ЕПГУ", callback_data="epgu_menu")])

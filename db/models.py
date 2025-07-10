@@ -16,6 +16,12 @@ class WorkDayStatusEnum(enum.Enum):
     PAUSED = "paused"
     FINISHED = "finished"
 
+class ProblemStatusEnum(enum.Enum):
+    NEW = "новое"
+    IN_PROGRESS = "в процессе решения"
+    SOLVED = "решено"
+    SOLVED_RETURN = "решено, отправлено на доработку"
+
 class Application(Base):
     __tablename__ = "applications"
     id = Column(Integer, primary_key=True)
@@ -24,10 +30,16 @@ class Application(Base):
     is_priority = Column(Boolean, default=False)
     status = Column(Enum(ApplicationStatusEnum), default=ApplicationStatusEnum.QUEUED)
     status_reason = Column(Text, nullable=True)
-    queue_type = Column(String, nullable=False)  # 'lk' или 'epgu'
+    queue_type = Column(String, nullable=False)  # 'lk', 'epgu', 'epgu_mail', 'epgu_problem'
     processed_by_id = Column(Integer, ForeignKey('employees.id'), nullable=True)
     processed_by = relationship("Employee", back_populates="applications")
     taken_at = Column(DateTime, nullable=True)  # Время взятия в обработку
+    postponed_until = Column(DateTime, nullable=True)  # Для ЕПГУ: отложено до
+    processed_at = Column(DateTime, nullable=True)     # Когда обработано
+    # Новые поля для проблемных дел
+    problem_status = Column(Enum(ProblemStatusEnum), default=ProblemStatusEnum.NEW)
+    problem_comment = Column(Text, nullable=True)
+    problem_responsible = Column(String, nullable=True)
 
 class Group(Base):
     __tablename__ = "groups"

@@ -3,7 +3,8 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from db.crud import (
-    add_employee, remove_employee, add_group_to_employee, remove_group_from_employee, list_employees_with_groups, is_admin, get_employee_by_tg_id, get_applications_by_queue_type, clear_queue_by_type, import_applications_from_excel, get_all_work_days_report
+    add_employee, remove_employee, add_group_to_employee, remove_group_from_employee, list_employees_with_groups, is_admin, get_employee_by_tg_id, get_applications_by_queue_type, clear_queue_by_type, import_applications_from_excel, get_all_work_days_report,
+    get_applications_statistics_by_queue
 )
 from keyboards.admin import admin_main_menu_keyboard, admin_staff_menu_keyboard, admin_queue_menu_keyboard, admin_queue_type_keyboard, admin_queue_pagination_keyboard, group_choice_keyboard, admin_reports_menu_keyboard
 from keyboards.main import main_menu_keyboard
@@ -11,6 +12,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from db.crud import Application, ApplicationStatusEnum
 from datetime import date, datetime
+import logging
+import os
+import tempfile
 
 router = Router()
 
@@ -264,13 +268,20 @@ async def admin_queue_type_action(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("admin_queue_page_"))
 async def admin_queue_page(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    queue_type = data.get("queue_type")
-    if not queue_type:
-        await callback.message.edit_text("Ошибка: не выбран тип очереди. Возвращаю в меню.", reply_markup=admin_queue_menu_keyboard())
+    # Ожидаем callback_data вида 'admin_queue_page_{queue_type}_{page}'
+    parts = callback.data.split("_")
+    if len(parts) < 4:
+        await callback.message.edit_text("Ошибка: некорректный формат страницы. Возвращаю в меню.", reply_markup=admin_queue_menu_keyboard())
         await state.clear()
         return
-    page = int(callback.data.replace("admin_queue_page_", ""))
-    await state.update_data(queue_page=page)
+    queue_type = parts[3]
+    try:
+        page = int(parts[4])
+    except (IndexError, ValueError):
+        await callback.message.edit_text("Ошибка: некорректный номер страницы. Возвращаю в меню.", reply_markup=admin_queue_menu_keyboard())
+        await state.clear()
+        return
+    await state.update_data(queue_type=queue_type, queue_page=page)
     await show_queue_page(callback, state, queue_type, page)
 
 async def show_queue_page(callback, state, queue_type, page):
@@ -286,7 +297,7 @@ async def show_queue_page(callback, state, queue_type, page):
         text = f"Очередь {queue_type} (стр. {page}/{total_pages}):\n"
         for app in page_apps:
             text += f"\n<b>{app.fio}</b> | {app.submitted_at.strftime('%Y-%m-%d %H:%M')} | {app.status.value}"
-    await callback.message.edit_text(text, reply_markup=admin_queue_pagination_keyboard(page, total_pages), parse_mode="HTML")
+    await callback.message.edit_text(text, reply_markup=admin_queue_pagination_keyboard(queue_type, page, total_pages), parse_mode="HTML")
 
 @router.callback_query(AdminQueueStates.waiting_clear_confirm, F.data == "admin_confirm_clear_queue")
 async def admin_confirm_clear_queue(callback: CallbackQuery, state: FSMContext):
@@ -305,55 +316,33 @@ async def admin_upload_queue_file(message: Message, state: FSMContext):
         return
     progress_msg = await message.answer("Документ получен. Начинаю скачивание...")
     try:
-        # Скачиваем файл Telegram
         file = await message.bot.download(message.document)
-        await progress_msg.edit_text("Документ скачан. Обработка...")
         import os
         import tempfile
-        from utils.excel import parse_lk_applications_from_excel
-        from db.crud import Application, ApplicationStatusEnum, get_session
         with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
             tmp.write(file.getvalue())
             tmp_path = tmp.name
-        if queue_type == "lk":
-            applications = parse_lk_applications_from_excel(tmp_path)
-        else:
-            applications = []
+        from db.crud import import_applications_from_excel
+        result = await import_applications_from_excel(tmp_path, queue_type)
         os.unlink(tmp_path)
-        total = len(applications)
-        added = 0
-        skipped = 0
-        added_priority = 0
-        chunk = 10
-        async for session in get_session():
-            # Получить все ФИО уже в очереди с этим типом и статусом QUEUED
-            existing = await session.execute(
-                select(Application.fio).where(
-                    Application.queue_type == queue_type,
-                    Application.status == ApplicationStatusEnum.QUEUED
-                )
-            )
-            existing_fios = set(fio for (fio,) in existing.fetchall())
-            for idx, app in enumerate(applications, 1):
-                if app["fio"] in existing_fios:
-                    skipped += 1
-                    continue
-                new_app = Application(
-                    fio=app["fio"],
-                    submitted_at=app["submitted_at"],
-                    queue_type=queue_type,
-                    is_priority=app.get("priority", False),
-                    status=ApplicationStatusEnum.QUEUED
-                )
-                session.add(new_app)
-                added += 1
-                if app.get("priority", False):
-                    added_priority += 1
-                if idx % chunk == 0 or idx == total:
-                    await session.commit()
-                    await progress_msg.edit_text(f"Обработано {idx} из {total} строк...")
-            await session.commit()
-        await progress_msg.edit_text(f"Импорт завершён! Всего строк: {total}\nДобавлено: {added} (приоритетных: {added_priority})\nПропущено (уже в очереди): {skipped}", reply_markup=admin_queue_menu_keyboard())
+        # result может быть None, но мы можем получить данные из логов, либо возвращать из функции
+        # Для пользователя выводим сколько добавлено, пропущено, всего строк
+        # Для этого возвращаем из import_applications_from_excel кортеж (added, skipped, total)
+        if isinstance(result, dict):
+            added = result.get('added', '?')
+            skipped = result.get('skipped', '?')
+            total = result.get('total', '?')
+        elif isinstance(result, tuple) and len(result) == 3:
+            added, skipped, total = result
+        else:
+            added = skipped = total = '?'
+        await progress_msg.edit_text(
+            f"Импорт завершён для очереди: {queue_type}.\n"
+            f"Всего строк: {total}\n"
+            f"Добавлено: {added}\n"
+            f"Пропущено: {skipped}",
+            reply_markup=admin_queue_menu_keyboard()
+        )
     except Exception as e:
         import traceback
         await progress_msg.edit_text(f"Ошибка при обработке файла: {e}\n{traceback.format_exc()[:1000]}", reply_markup=admin_queue_menu_keyboard())
@@ -518,32 +507,42 @@ async def admin_applications_report(callback: CallbackQuery, state: FSMContext):
     if not await check_admin(callback.from_user.id):
         return
     
-    # Получаем отчет за сегодня
-    reports = await get_all_work_days_report()
+    # Получаем отчет по заявлениям за сегодня
+    queue_stats = await get_applications_statistics_by_queue()
     
-    if not reports:
+    if not queue_stats:
         await callback.message.edit_text(
             "Нет данных о заявлениях за сегодня.",
             reply_markup=admin_reports_menu_keyboard()
         )
         return
     
-    # Формируем отчет только по заявлениям
+    # Формируем отчет по заявлениям
     report_text = f"📋 ОТЧЕТ ПО ЗАЯВЛЕНИЯМ за {date.today().strftime('%d.%m.%Y')}\n\n"
     
     total_applications = 0
     
-    for report in reports:
-        if report['applications_processed'] > 0:  # Показываем только тех, кто обрабатывал заявления
-            report_text += f"👤 {report['employee_fio']}\n"
-            report_text += f"   Обработано заявлений: {report['applications_processed']}\n"
-            if report['start_time']:
-                report_text += f"   Начало работы: {report['start_time'].strftime('%H:%M')}\n"
-            if report['end_time']:
-                report_text += f"   Окончание работы: {report['end_time'].strftime('%H:%M')}\n"
+    # Сортируем очереди для красивого отображения
+    queue_order = ['lk', 'epgu', 'epgu_mail', 'epgu_problem']
+    
+    for queue_type in queue_order:
+        if queue_type in queue_stats:
+            stats = queue_stats[queue_type]
+            queue_name = {
+                'lk': 'ЛК',
+                'epgu': 'ЕПГУ',
+                'epgu_mail': 'ЕПГУ (почта)',
+                'epgu_problem': 'ЕПГУ (проблемы)'
+            }.get(queue_type, queue_type)
+            
+            report_text += f"📊 {queue_name}: {stats['total']} заявлений\n"
+            
+            if stats['by_employee']:
+                for emp_fio, count in stats['by_employee'].items():
+                    report_text += f"   👤 {emp_fio}: {count}\n"
+            
             report_text += "\n"
-        
-        total_applications += report['applications_processed']
+            total_applications += stats['total']
     
     # Итоги
     report_text += f"📈 ИТОГО:\n"
@@ -552,4 +551,53 @@ async def admin_applications_report(callback: CallbackQuery, state: FSMContext):
     if total_applications == 0:
         report_text += "   Сегодня заявления не обрабатывались"
     
-    await callback.message.edit_text(report_text, reply_markup=admin_reports_menu_keyboard()) 
+    await callback.message.edit_text(report_text, reply_markup=admin_reports_menu_keyboard())
+
+@router.callback_query(F.data == "admin_add_test_employees")
+async def admin_add_test_employees(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    # Тестовые сотрудники
+    test_employees = [
+        {"tg_id": "6974821754", "fio": "Test Dot"},
+        {"tg_id": "5418889030", "fio": "Test Msk"}
+    ]
+    
+    added_count = 0
+    already_exists_count = 0
+    
+    for emp_data in test_employees:
+        # Проверяем, существует ли уже сотрудник
+        existing_emp = await get_employee_by_tg_id(emp_data["tg_id"])
+        if existing_emp:
+            already_exists_count += 1
+            continue
+        
+        # Добавляем сотрудника
+        try:
+            await add_employee(emp_data["tg_id"], emp_data["fio"])
+            added_count += 1
+        except Exception as e:
+            logging.error(f"Ошибка при добавлении тестового сотрудника {emp_data['fio']}: {e}")
+    
+    # Формируем сообщение о результате
+    message_text = f"✅ Добавление тестовых сотрудников завершено!\n\n"
+    message_text += f"➕ Добавлено: {added_count}\n"
+    message_text += f"⚠️ Уже существует: {already_exists_count}\n\n"
+    
+    if added_count > 0:
+        message_text += "Добавленные сотрудники:\n"
+        for emp_data in test_employees:
+            message_text += f"• {emp_data['fio']} (ID: {emp_data['tg_id']})\n"
+    
+    await callback.message.edit_text(message_text, reply_markup=admin_staff_menu_keyboard())
+
+def group_choice_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="ЛК", callback_data="group_lk")],
+        [InlineKeyboardButton(text="ЕПГУ", callback_data="group_epgu")],
+        [InlineKeyboardButton(text="Почта", callback_data="group_mail")],
+        [InlineKeyboardButton(text="Разбор проблем", callback_data="group_problem")],
+        [InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]
+    ]) 

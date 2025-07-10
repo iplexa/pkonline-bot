@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, date
 from .session import get_session
 import aiohttp
 import tempfile
-from utils.excel import parse_lk_applications_from_excel
+from utils.excel import parse_lk_applications_from_excel, parse_epgu_applications_from_excel
 import pytz
 import logging
 
@@ -135,9 +135,9 @@ async def find_application_by_fio(fio: str, queue_type: str):
         result = await session.execute(stmt)
         return result.scalars().all()
 
-async def get_employee_by_tg_id(tg_id: str):
+async def get_employee_by_tg_id(tg_id):
     async for session in get_session():
-        stmt = select(Employee).where(Employee.tg_id == tg_id).options(selectinload(Employee.groups))
+        stmt = select(Employee).where(Employee.tg_id == str(tg_id)).options(selectinload(Employee.groups))
         result = await session.execute(stmt)
         return result.scalars().first()
 
@@ -226,39 +226,73 @@ async def clear_queue_by_type(queue_type: str):
         )
         await session.commit()
 
-async def import_applications_from_excel(document, queue_type: str):
-    file = await document.download(destination_dir=None)
+async def import_applications_from_excel(file_path, queue_type: str):
     import os
-    import tempfile
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
-        tmp.write(file.getvalue())
-        tmp_path = tmp.name
+    from utils.excel import parse_lk_applications_from_excel, parse_epgu_applications_from_excel
     if queue_type == "lk":
-        applications = parse_lk_applications_from_excel(tmp_path)
+        applications = parse_lk_applications_from_excel(file_path)
+    elif queue_type == "epgu":
+        applications = parse_epgu_applications_from_excel(file_path)
     else:
-        applications = []  # Для других очередей можно реализовать аналогично
-    os.unlink(tmp_path)
+        applications = []
+    logger = logging.getLogger("epgu_import")
+    logger.info(f"Импорт заявлений: очередь={queue_type}, всего строк в файле: {len(applications)}")
+    added = 0
+    skipped = 0
+    skipped_details = []
     async for session in get_session():
-        # Получить все ФИО уже в очереди с этим типом и статусом QUEUED
-        existing = await session.execute(
-            select(Application.fio).where(
-                Application.queue_type == queue_type,
-                Application.status == ApplicationStatusEnum.QUEUED
+        if queue_type == "epgu":
+            # Получить все (fio, submitted_at) уже в базе для epgu, независимо от статуса
+            existing = await session.execute(
+                select(Application.fio, Application.submitted_at).where(
+                    Application.queue_type == "epgu"
+                )
             )
-        )
-        existing_fios = set(fio for (fio,) in existing.fetchall())
-        for app in applications:
-            if app["fio"] in existing_fios:
-                continue
-            new_app = Application(
-                fio=app["fio"],
-                submitted_at=app["submitted_at"],
-                queue_type=queue_type,
-                is_priority=app.get("priority", False),
-                status=ApplicationStatusEnum.QUEUED
+            existing_keys = set((fio, submitted_at) for fio, submitted_at in existing.fetchall())
+            for app in applications:
+                key = (app["fio"], app["submitted_at"])
+                if key in existing_keys:
+                    skipped += 1
+                    skipped_details.append(f"{app['fio']} | {app['submitted_at']} (уже есть)")
+                    continue
+                new_app = Application(
+                    fio=app["fio"],
+                    submitted_at=app["submitted_at"],
+                    queue_type="epgu",
+                    status=ApplicationStatusEnum.QUEUED
+                )
+                session.add(new_app)
+                added += 1
+            await session.commit()
+            logger.info(f"Добавлено заявлений: {added}, пропущено: {skipped}")
+            if skipped_details:
+                logger.info("Пропущенные строки (уже есть в базе):\n" + "\n".join(skipped_details))
+        else:
+            # Для ЛК проверяем только заявления в статусе QUEUED
+            existing = await session.execute(
+                select(Application.fio).where(
+                    Application.queue_type == queue_type,
+                    Application.status == ApplicationStatusEnum.QUEUED
+                )
             )
-            session.add(new_app)
-        await session.commit()
+            existing_fios = set(fio for (fio,) in existing.fetchall())
+            for app in applications:
+                if app["fio"] in existing_fios:
+                    skipped += 1
+                    continue
+                new_app = Application(
+                    fio=app["fio"],
+                    submitted_at=app["submitted_at"],
+                    queue_type=queue_type,
+                    is_priority=app.get("priority", False),
+                    status=ApplicationStatusEnum.QUEUED
+                )
+                session.add(new_app)
+                added += 1
+            await session.commit()
+            logger.info(f"Добавлено заявлений: {added}, пропущено: {skipped}")
+    logger.info(f"Импорт завершен: очередь={queue_type}, добавлено={added}, пропущено={skipped}")
+    return added, skipped, len(applications)
 
 async def return_application_to_queue(app_id: int):
     async for session in get_session():
@@ -353,6 +387,15 @@ async def start_break(employee_id: int):
         if active_break:
             return None
         
+        # Обновляем общее время работы до начала перерыва
+        if work_day.start_time and work_day.status.value == "active":
+            current_time = get_moscow_now()
+            elapsed_seconds = int((current_time - work_day.start_time).total_seconds())
+            work_day.total_work_time = elapsed_seconds - work_day.total_break_time
+        
+        # Устанавливаем статус как приостановленный
+        work_day.status = WorkDayStatusEnum.PAUSED
+        
         work_break = WorkBreak(
             work_day_id=work_day.id,
             start_time=get_moscow_now()
@@ -367,15 +410,19 @@ async def end_break(employee_id: int):
         work_day = await get_current_work_day(employee_id)
         if not work_day:
             return None
-        
         active_break = await get_active_break(work_day.id)
         if not active_break:
             return None
-        
         active_break.end_time = get_moscow_now()
         active_break.duration = int((active_break.end_time - active_break.start_time).total_seconds())
         work_day.total_break_time += active_break.duration
-        
+        # Пересчитываем total_work_time после завершения перерыва
+        if work_day.start_time and work_day.status.value == "paused":
+            current_time = get_moscow_now()
+            elapsed_seconds = int((current_time - work_day.start_time).total_seconds())
+            work_day.total_work_time = elapsed_seconds - work_day.total_break_time
+        # Возвращаем статус как активный
+        work_day.status = WorkDayStatusEnum.ACTIVE
         await session.commit()
         return active_break
 
@@ -505,4 +552,166 @@ async def get_all_work_days_report(report_date: date = None):
             }
             reports.append(report)
         
-        return reports 
+        return reports
+
+async def get_next_epgu_application(employee_id: int = None, bot=None):
+    """Получить следующее заявление из очереди ЕПГУ (не отложенное)"""
+    async for session in get_session():
+        # Сначала очищаем просроченные заявления
+        expired_apps = await cleanup_expired_applications()
+        
+        # Отправляем уведомления о возвращённых заявлениях
+        if expired_apps and bot:
+            from config import ADMIN_CHAT_ID
+            for app_info in expired_apps:
+                # Уведомление в админ-чат
+                admin_msg = f"⚠️ Заявление {app_info['app_id']} ({app_info['fio']}) возвращено в очередь {app_info['queue_type']} по истечении времени"
+                if app_info['employee_fio']:
+                    admin_msg += f"\nСотрудник: {app_info['employee_fio']}"
+                await bot.send_message(ADMIN_CHAT_ID, admin_msg)
+                
+                # Уведомление сотруднику
+                if app_info['employee_tg_id']:
+                    try:
+                        employee_msg = f"⚠️ Заявление {app_info['app_id']} ({app_info['fio']}) возвращено в очередь по истечении времени обработки (1 час)"
+                        await bot.send_message(app_info['employee_tg_id'], employee_msg)
+                    except Exception:
+                        pass
+        
+        # Получаем заявление из очереди ЕПГУ, которое не отложено
+        now = get_moscow_now()
+        stmt = select(Application).where(
+            Application.queue_type == "epgu",
+            Application.status == ApplicationStatusEnum.QUEUED,
+            (Application.postponed_until.is_(None) | (Application.postponed_until <= now))
+        ).order_by(
+            Application.submitted_at.asc()
+        )
+        result = await session.execute(stmt)
+        app = result.scalars().first()
+        
+        if app and employee_id:
+            # Сразу блокируем заявление за сотрудником
+            app.status = ApplicationStatusEnum.IN_PROGRESS
+            app.processed_by_id = employee_id
+            app.taken_at = datetime.now()
+            await session.commit()
+        
+        return app
+
+async def update_application_queue_type(app_id: int, new_queue_type: str, employee_id: int = None, reason: str = None):
+    """Обновить тип очереди заявления (для перемещения между очередями ЕПГУ)"""
+    async for session in get_session():
+        stmt = update(Application).where(Application.id == app_id).values(
+            queue_type=new_queue_type,
+            status=ApplicationStatusEnum.QUEUED,
+            processed_by_id=employee_id,
+            processed_at=get_moscow_now() if employee_id else None,
+            status_reason=reason,
+            taken_at=None  # Сбрасываем взятие в обработку
+        )
+        await session.execute(stmt)
+        await session.commit()
+
+async def postpone_application(app_id: int, employee_id: int = None):
+    """Отложить заявление на сутки (для 'не дозвонились')"""
+    async for session in get_session():
+        from datetime import timedelta
+        postponed_until = get_moscow_now() + timedelta(days=1)
+        
+        stmt = update(Application).where(Application.id == app_id).values(
+            status=ApplicationStatusEnum.QUEUED,
+            processed_by_id=employee_id,
+            processed_at=get_moscow_now() if employee_id else None,
+            postponed_until=postponed_until,
+            taken_at=None
+        )
+        await session.execute(stmt)
+        await session.commit()
+
+async def get_applications_statistics_by_queue(report_date: date = None):
+    """Получить статистику по заявлениям в разных очередях за день"""
+    async for session in get_session():
+        if not report_date:
+            report_date = get_moscow_date()
+        
+        today_start = datetime.combine(report_date, datetime.min.time())
+        today_end = datetime.combine(report_date, datetime.max.time())
+        
+        # Статистика по обработанным заявлениям (по processed_at)
+        stmt = select(Application.queue_type, Application.processed_by_id).where(
+            Application.processed_at >= today_start,
+            Application.processed_at <= today_end
+        ).options(selectinload(Application.processed_by))
+        result = await session.execute(stmt)
+        processed_apps = result.scalars().all()
+        
+        # Группируем по очередям
+        queue_stats = {}
+        for app in processed_apps:
+            queue_type = app.queue_type
+            if queue_type not in queue_stats:
+                queue_stats[queue_type] = {
+                    'total': 0,
+                    'by_employee': {}
+                }
+            queue_stats[queue_type]['total'] += 1
+            
+            if app.processed_by:
+                emp_fio = app.processed_by.fio or f"ID:{app.processed_by.id}"
+                if emp_fio not in queue_stats[queue_type]['by_employee']:
+                    queue_stats[queue_type]['by_employee'][emp_fio] = 0
+                queue_stats[queue_type]['by_employee'][emp_fio] += 1
+        
+        return queue_stats
+
+async def get_applications_by_fio_and_queue(fio: str, queue_type: str):
+    """Получить заявления по ФИО в определенной очереди"""
+    async for session in get_session():
+        stmt = select(Application).where(
+            Application.fio.ilike(f"%{fio}%"),
+            Application.queue_type == queue_type
+        ).order_by(Application.submitted_at.asc())
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+async def get_problem_applications(queue_type: str):
+    async for session in get_session():
+        stmt = select(Application).where(
+            Application.queue_type == f"{queue_type}_problem"
+        ).order_by(Application.submitted_at.asc())
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+async def get_application_by_id(app_id: int):
+    async for session in get_session():
+        stmt = select(Application).where(Application.id == app_id)
+        result = await session.execute(stmt)
+        return result.scalars().first()
+
+async def update_problem_status(app_id: int, status: str, comment: str = None, responsible: str = None):
+    async for session in get_session():
+        stmt = select(Application).where(Application.id == app_id)
+        result = await session.execute(stmt)
+        app = result.scalars().first()
+        if not app:
+            return None
+        from db.models import ProblemStatusEnum
+        if status == "solved":
+            app.problem_status = ProblemStatusEnum.SOLVED
+            app.status = ApplicationStatusEnum.ACCEPTED
+            app.queue_type = app.queue_type.replace("_problem", "")
+        elif status == "solved_return":
+            app.problem_status = ProblemStatusEnum.SOLVED_RETURN
+            app.status = ApplicationStatusEnum.QUEUED
+            app.queue_type = app.queue_type.replace("_problem", "")
+        elif status == "in_progress":
+            app.problem_status = ProblemStatusEnum.IN_PROGRESS
+            if comment:
+                app.problem_comment = comment
+            if responsible:
+                app.problem_responsible = responsible
+        else:
+            app.problem_status = ProblemStatusEnum.NEW
+        await session.commit()
+        return app 

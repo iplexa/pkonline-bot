@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery
 from db.crud import get_next_application, update_application_status, get_employee_by_tg_id, employee_has_group, return_application_to_queue, increment_processed_applications
 from db.models import ApplicationStatusEnum
-from keyboards.lk import lk_queue_keyboard, lk_decision_keyboard
+from keyboards.lk import lk_queue_keyboard, lk_decision_keyboard, lk_reason_keyboard
 from keyboards.main import main_menu_keyboard
 from config import ADMIN_CHAT_ID
 import logging
@@ -68,7 +68,24 @@ async def process_lk_decision(callback: CallbackQuery, state: FSMContext):
     elif callback.data in ["reject_lk", "problem_lk"]:
         await state.set_state(LKStates.waiting_reason)
         await state.update_data(decision=callback.data)
-        await callback.message.edit_text("Укажите причину:", reply_markup=main_menu_keyboard())
+        await callback.message.edit_text("Укажите причину:", reply_markup=lk_reason_keyboard())
+
+@router.callback_query(LKStates.waiting_reason, F.data == "lk_cancel_reason")
+async def cancel_lk_reason(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    app_id = data.get("app_id")
+    if app_id:
+        await callback.message.edit_text(
+            "Выберите действие:",
+            reply_markup=lk_decision_keyboard(menu=False)
+        )
+        await state.set_state(LKStates.waiting_decision)
+    else:
+        await callback.message.edit_text(
+            "Действие отменено.",
+            reply_markup=lk_queue_keyboard(menu=True)
+        )
+        await state.clear()
 
 @router.message(LKStates.waiting_reason)
 async def process_lk_reason(message: Message, state: FSMContext):

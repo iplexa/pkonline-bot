@@ -48,6 +48,14 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id')
         )
 
+    # Явно создаем ENUM для problem_status
+    problem_status_enum = sa.Enum('NEW', 'IN_PROGRESS', 'SOLVED', 'SOLVED_RETURN', name='problemstatusenum')
+    problem_status_enum.create(op.get_bind(), checkfirst=True)
+    with op.batch_alter_table('applications') as batch_op:
+        batch_op.add_column(sa.Column('problem_status', problem_status_enum, nullable=True))
+        batch_op.add_column(sa.Column('problem_comment', sa.Text(), nullable=True))
+        batch_op.add_column(sa.Column('problem_responsible', sa.String(), nullable=True))
+
 
 def downgrade() -> None:
     # Удаляем таблицы в обратном порядке

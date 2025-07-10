@@ -4,7 +4,6 @@ def work_time_keyboard():
     """Клавиатура для управления рабочим временем"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🟢 Начать рабочий день", callback_data="start_work_day")],
-        [InlineKeyboardButton(text="📊 Мой отчет", callback_data="work_report")],
         [InlineKeyboardButton(text="Меню", callback_data="main_menu")],
     ])
 

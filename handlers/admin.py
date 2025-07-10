@@ -4,13 +4,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from db.crud import (
     add_employee, remove_employee, add_group_to_employee, remove_group_from_employee, list_employees_with_groups, is_admin, get_employee_by_tg_id, get_applications_by_queue_type, clear_queue_by_type, import_applications_from_excel, get_all_work_days_report,
-    get_applications_statistics_by_queue
+    get_applications_statistics_by_queue, search_applications_by_fio, update_application_field, delete_application, get_all_employees
 )
-from keyboards.admin import admin_main_menu_keyboard, admin_staff_menu_keyboard, admin_queue_menu_keyboard, admin_queue_type_keyboard, admin_queue_pagination_keyboard, group_choice_keyboard, admin_reports_menu_keyboard
+from keyboards.admin import admin_main_menu_keyboard, admin_staff_menu_keyboard, admin_queue_menu_keyboard, admin_queue_type_keyboard, admin_queue_pagination_keyboard, group_choice_keyboard, admin_reports_menu_keyboard, admin_search_applications_keyboard, admin_application_edit_keyboard, admin_queue_choice_keyboard, admin_status_choice_keyboard, admin_problem_status_choice_keyboard, admin_cancel_keyboard
 from keyboards.main import main_menu_keyboard
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
-from db.crud import Application, ApplicationStatusEnum
+from db.crud import Application, ApplicationStatusEnum, get_application_by_id
 from datetime import date, datetime
 import logging
 import os
@@ -31,6 +31,14 @@ class AdminQueueStates(StatesGroup):
     waiting_queue_type = State()
     waiting_upload_file = State()
     waiting_clear_confirm = State()
+
+class AdminApplicationStates(StatesGroup):
+    waiting_fio_search = State()
+    waiting_fio_edit = State()
+    waiting_date_edit = State()
+    waiting_reason_edit = State()
+    waiting_responsible_edit = State()
+    waiting_problem_comment_edit = State()
 
 QUEUE_PAGE_SIZE = 20
 
@@ -600,4 +608,483 @@ def group_choice_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Почта", callback_data="group_mail")],
         [InlineKeyboardButton(text="Разбор проблем", callback_data="group_problem")],
         [InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]
-    ]) 
+    ])
+
+# ===== ОБРАБОТЧИКИ ПОИСКА И РЕДАКТИРОВАНИЯ ЗАЯВЛЕНИЙ =====
+
+@router.callback_query(F.data == "admin_search_applications")
+async def admin_search_applications_menu(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    await state.clear()
+    await callback.message.edit_text(
+        "🔍 Поиск и редактирование заявлений\n\nВыберите действие:",
+        reply_markup=admin_search_applications_keyboard()
+    )
+
+@router.callback_query(F.data == "admin_search_by_fio")
+async def admin_search_by_fio_start(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    await state.set_state(AdminApplicationStates.waiting_fio_search)
+    await callback.message.edit_text(
+        "Введите ФИО для поиска заявлений во всех очередях:",
+        reply_markup=admin_cancel_keyboard()
+    )
+
+@router.message(AdminApplicationStates.waiting_fio_search)
+async def admin_search_by_fio_process(message: Message, state: FSMContext):
+    if not await check_admin(message.from_user.id):
+        return
+    
+    fio = message.text.strip()
+    if not fio:
+        await message.answer("Пожалуйста, введите ФИО для поиска.", reply_markup=admin_cancel_keyboard())
+        return
+    
+    applications = await search_applications_by_fio(fio)
+    
+    if not applications:
+        await message.answer(
+            f"Заявления для '{fio}' не найдены ни в одной очереди.",
+            reply_markup=admin_search_applications_keyboard()
+        )
+        await state.clear()
+        return
+    
+    # Показываем найденные заявления
+    text = f"🔍 Найдено {len(applications)} заявлений для '{fio}':\n\n"
+    
+    for i, app in enumerate(applications[:10], 1):  # Показываем первые 10
+        status_emoji = {
+            'queued': '⏳',
+            'in_progress': '🔄',
+            'accepted': '✅',
+            'rejected': '❌',
+            'problem': '⚠️'
+        }.get(app.status.value, '❓')
+        
+        queue_name = {
+            'lk': 'ЛК',
+            'epgu': 'ЕПГУ',
+            'epgu_mail': 'ЕПГУ (почта)',
+            'epgu_problem': 'ЕПГУ (проблемы)'
+        }.get(app.queue_type, app.queue_type)
+        
+        text += f"{i}. {status_emoji} <b>ID: {app.id}</b>\n"
+        text += f"   📋 {app.fio}\n"
+        text += f"   📅 {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
+        text += f"   🏛️ {queue_name}\n"
+        text += f"   📊 {app.status.value}\n"
+        if app.processed_by:
+            text += f"   👤 {app.processed_by.fio}\n"
+        text += "\n"
+    
+    if len(applications) > 10:
+        text += f"... и еще {len(applications) - 10} заявлений\n\n"
+    
+    text += "Выберите заявление для редактирования:"
+    
+    # Создаем клавиатуру с кнопками для каждого заявления
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+    for i, app in enumerate(applications[:10], 1):
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(
+                text=f"{i}. {app.fio} ({app.queue_type})", 
+                callback_data=f"admin_edit_application_{app.id}"
+            )
+        ])
+    keyboard.inline_keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_search_applications")])
+    
+    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    await state.clear()
+
+@router.callback_query(F.data.startswith("admin_edit_application_"))
+async def admin_edit_application_menu(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    app_id = int(callback.data.replace("admin_edit_application_", ""))
+    app = await get_application_by_id(app_id)
+    
+    if not app:
+        await callback.message.edit_text(
+            "Заявление не найдено.",
+            reply_markup=admin_search_applications_keyboard()
+        )
+        return
+    
+    # Формируем подробную информацию о заявлении
+    status_emoji = {
+        'queued': '⏳',
+        'in_progress': '🔄',
+        'accepted': '✅',
+        'rejected': '❌',
+        'problem': '⚠️'
+    }.get(app.status.value, '❓')
+    
+    queue_name = {
+        'lk': 'ЛК',
+        'epgu': 'ЕПГУ',
+        'epgu_mail': 'ЕПГУ (почта)',
+        'epgu_problem': 'ЕПГУ (проблемы)'
+    }.get(app.queue_type, app.queue_type)
+    
+    text = f"📋 <b>Редактирование заявления</b>\n\n"
+    text += f"🆔 <b>ID:</b> {app.id}\n"
+    text += f"👤 <b>ФИО:</b> {app.fio}\n"
+    text += f"📅 <b>Дата подачи:</b> {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
+    text += f"🏛️ <b>Очередь:</b> {queue_name}\n"
+    text += f"📊 <b>Статус:</b> {status_emoji} {app.status.value}\n"
+    text += f"💬 <b>Причина:</b> {app.status_reason or '-'}\n"
+    text += f"👤 <b>Обработал:</b> {app.processed_by.fio if app.processed_by else '-'}\n"
+    text += f"⚠️ <b>Статус проблемы:</b> {app.problem_status.value if app.problem_status else '-'}\n"
+    text += f"💬 <b>Комментарий проблемы:</b> {app.problem_comment or '-'}\n"
+    text += f"👤 <b>Ответственный:</b> {app.problem_responsible or '-'}\n"
+    
+    await callback.message.edit_text(text, reply_markup=admin_application_edit_keyboard(app_id), parse_mode="HTML")
+
+# Обработчики редактирования полей
+@router.callback_query(F.data.startswith("admin_edit_fio_"))
+async def admin_edit_fio_start(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    app_id = int(callback.data.replace("admin_edit_fio_", ""))
+    await state.update_data(app_id=app_id)
+    await state.set_state(AdminApplicationStates.waiting_fio_edit)
+    await callback.message.edit_text(
+        "Введите новое ФИО:",
+        reply_markup=admin_cancel_keyboard()
+    )
+
+@router.message(AdminApplicationStates.waiting_fio_edit)
+async def admin_edit_fio_process(message: Message, state: FSMContext):
+    if not await check_admin(message.from_user.id):
+        return
+    
+    data = await state.get_data()
+    app_id = data.get("app_id")
+    new_fio = message.text.strip()
+    
+    if not new_fio:
+        await message.answer("Пожалуйста, введите ФИО.", reply_markup=admin_cancel_keyboard())
+        return
+    
+    success = await update_application_field(app_id, "fio", new_fio)
+    if success:
+        await message.answer(f"✅ ФИО изменено на: {new_fio}")
+        # Возвращаемся к редактированию заявления
+        app = await get_application_by_id(app_id)
+        if app:
+            await admin_edit_application_menu(
+                type('CallbackQuery', (), {'data': f'admin_edit_application_{app_id}', 'message': message, 'from_user': message.from_user})(),
+                state
+            )
+    else:
+        await message.answer("❌ Ошибка при изменении ФИО", reply_markup=admin_cancel_keyboard())
+    
+    await state.clear()
+
+@router.callback_query(F.data.startswith("admin_edit_queue_"))
+async def admin_edit_queue_menu(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    app_id = int(callback.data.replace("admin_edit_queue_", ""))
+    await callback.message.edit_text(
+        "Выберите новую очередь:",
+        reply_markup=admin_queue_choice_keyboard(app_id)
+    )
+
+@router.callback_query(F.data.startswith("admin_set_queue_"))
+async def admin_set_queue(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    # Правильно парсим callback_data
+    data = callback.data.replace("admin_set_queue_", "")
+    
+    # Определяем тип очереди и ID заявления
+    if data.startswith("epgu_mail_"):
+        queue_type = "epgu_mail"
+        app_id = int(data.replace("epgu_mail_", ""))
+    elif data.startswith("epgu_problem_"):
+        queue_type = "epgu_problem"
+        app_id = int(data.replace("epgu_problem_", ""))
+    elif data.startswith("epgu_"):
+        queue_type = "epgu"
+        app_id = int(data.replace("epgu_", ""))
+    elif data.startswith("lk_"):
+        queue_type = "lk"
+        app_id = int(data.replace("lk_", ""))
+    else:
+        await callback.message.edit_text("❌ Неизвестный тип очереди", reply_markup=admin_cancel_keyboard())
+        return
+    
+    success = await update_application_field(app_id, "queue_type", queue_type)
+    if success:
+        queue_name = {
+            'lk': 'ЛК',
+            'epgu': 'ЕПГУ',
+            'epgu_mail': 'ЕПГУ (почта)',
+            'epgu_problem': 'ЕПГУ (проблемы)'
+        }.get(queue_type, queue_type)
+        await callback.message.edit_text(f"✅ Очередь изменена на: {queue_name}")
+        # Возвращаемся к редактированию заявления
+        app = await get_application_by_id(app_id)
+        if app:
+            await admin_edit_application_menu(callback, state)
+    else:
+        await callback.message.edit_text("❌ Ошибка при изменении очереди", reply_markup=admin_cancel_keyboard())
+
+@router.callback_query(F.data.startswith("admin_edit_status_"))
+async def admin_edit_status_menu(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    app_id = int(callback.data.replace("admin_edit_status_", ""))
+    await callback.message.edit_text(
+        "Выберите новый статус:",
+        reply_markup=admin_status_choice_keyboard(app_id)
+    )
+
+@router.callback_query(F.data.startswith("admin_set_status_"))
+async def admin_set_status(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    # Правильно парсим callback_data
+    data = callback.data.replace("admin_set_status_", "")
+    
+    # Определяем статус и ID заявления
+    if data.startswith("in_progress_"):
+        status_name = "in_progress"
+        app_id = int(data.replace("in_progress_", ""))
+    elif data.startswith("accepted_"):
+        status_name = "accepted"
+        app_id = int(data.replace("accepted_", ""))
+    elif data.startswith("rejected_"):
+        status_name = "rejected"
+        app_id = int(data.replace("rejected_", ""))
+    elif data.startswith("problem_"):
+        status_name = "problem"
+        app_id = int(data.replace("problem_", ""))
+    elif data.startswith("queued_"):
+        status_name = "queued"
+        app_id = int(data.replace("queued_", ""))
+    else:
+        await callback.message.edit_text("❌ Неизвестный статус", reply_markup=admin_cancel_keyboard())
+        return
+    
+    status_map = {
+        'queued': ApplicationStatusEnum.QUEUED,
+        'in_progress': ApplicationStatusEnum.IN_PROGRESS,
+        'accepted': ApplicationStatusEnum.ACCEPTED,
+        'rejected': ApplicationStatusEnum.REJECTED,
+        'problem': ApplicationStatusEnum.PROBLEM
+    }
+    
+    new_status = status_map.get(status_name)
+    if new_status:
+        success = await update_application_field(app_id, "status", new_status)
+        if success:
+            status_display = {
+                'queued': 'В очереди',
+                'in_progress': 'В обработке',
+                'accepted': 'Принято',
+                'rejected': 'Отклонено',
+                'problem': 'Проблема'
+            }.get(status_name, status_name)
+            await callback.message.edit_text(f"✅ Статус изменен на: {status_display}")
+            # Возвращаемся к редактированию заявления
+            app = await get_application_by_id(app_id)
+            if app:
+                await admin_edit_application_menu(callback, state)
+        else:
+            await callback.message.edit_text("❌ Ошибка при изменении статуса", reply_markup=admin_cancel_keyboard())
+
+@router.callback_query(F.data.startswith("admin_edit_reason_"))
+async def admin_edit_reason_start(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    app_id = int(callback.data.replace("admin_edit_reason_", ""))
+    await state.update_data(app_id=app_id)
+    await state.set_state(AdminApplicationStates.waiting_reason_edit)
+    await callback.message.edit_text(
+        "Введите новую причину:",
+        reply_markup=admin_cancel_keyboard()
+    )
+
+@router.message(AdminApplicationStates.waiting_reason_edit)
+async def admin_edit_reason_process(message: Message, state: FSMContext):
+    if not await check_admin(message.from_user.id):
+        return
+    
+    data = await state.get_data()
+    app_id = data.get("app_id")
+    new_reason = message.text.strip()
+    
+    success = await update_application_field(app_id, "status_reason", new_reason)
+    if success:
+        await message.answer(f"✅ Причина изменена на: {new_reason}")
+        # Возвращаемся к редактированию заявления
+        app = await get_application_by_id(app_id)
+        if app:
+            await admin_edit_application_menu(
+                type('CallbackQuery', (), {'data': f'admin_edit_application_{app_id}', 'message': message, 'from_user': message.from_user})(),
+                state
+            )
+    else:
+        await message.answer("❌ Ошибка при изменении причины", reply_markup=admin_cancel_keyboard())
+    
+    await state.clear()
+
+@router.callback_query(F.data.startswith("admin_edit_responsible_"))
+async def admin_edit_responsible_start(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    app_id = int(callback.data.replace("admin_edit_responsible_", ""))
+    await state.update_data(app_id=app_id)
+    await state.set_state(AdminApplicationStates.waiting_responsible_edit)
+    await callback.message.edit_text(
+        "Введите ФИО ответственного:",
+        reply_markup=admin_cancel_keyboard()
+    )
+
+@router.message(AdminApplicationStates.waiting_responsible_edit)
+async def admin_edit_responsible_process(message: Message, state: FSMContext):
+    if not await check_admin(message.from_user.id):
+        return
+    
+    data = await state.get_data()
+    app_id = data.get("app_id")
+    new_responsible = message.text.strip()
+    
+    success = await update_application_field(app_id, "problem_responsible", new_responsible)
+    if success:
+        await message.answer(f"✅ Ответственный изменен на: {new_responsible}")
+        # Возвращаемся к редактированию заявления
+        app = await get_application_by_id(app_id)
+        if app:
+            await admin_edit_application_menu(
+                type('CallbackQuery', (), {'data': f'admin_edit_application_{app_id}', 'message': message, 'from_user': message.from_user})(),
+                state
+            )
+    else:
+        await message.answer("❌ Ошибка при изменении ответственного", reply_markup=admin_cancel_keyboard())
+    
+    await state.clear()
+
+@router.callback_query(F.data.startswith("admin_edit_problem_status_"))
+async def admin_edit_problem_status_menu(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    app_id = int(callback.data.replace("admin_edit_problem_status_", ""))
+    await callback.message.edit_text(
+        "Выберите новый статус проблемы:",
+        reply_markup=admin_problem_status_choice_keyboard(app_id)
+    )
+
+@router.callback_query(F.data.startswith("admin_set_problem_status_"))
+async def admin_set_problem_status(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    # Правильно парсим callback_data
+    data = callback.data.replace("admin_set_problem_status_", "")
+    
+    # Определяем статус и ID заявления
+    if data.startswith("solved_return_"):
+        status_name = "solved_return"
+        app_id = int(data.replace("solved_return_", ""))
+    elif data.startswith("in_progress_"):
+        status_name = "in_progress"
+        app_id = int(data.replace("in_progress_", ""))
+    elif data.startswith("solved_"):
+        status_name = "solved"
+        app_id = int(data.replace("solved_", ""))
+    elif data.startswith("new_"):
+        status_name = "new"
+        app_id = int(data.replace("new_", ""))
+    else:
+        await callback.message.edit_text("❌ Неизвестный статус проблемы", reply_markup=admin_cancel_keyboard())
+        return
+    
+    from db.models import ProblemStatusEnum
+    status_map = {
+        'new': ProblemStatusEnum.NEW,
+        'in_progress': ProblemStatusEnum.IN_PROGRESS,
+        'solved': ProblemStatusEnum.SOLVED,
+        'solved_return': ProblemStatusEnum.SOLVED_RETURN
+    }
+    
+    new_status = status_map.get(status_name)
+    if new_status:
+        success = await update_application_field(app_id, "problem_status", new_status)
+        if success:
+            status_display = {
+                'new': 'Новое',
+                'in_progress': 'В процессе решения',
+                'solved': 'Решено',
+                'solved_return': 'Решено, отправлено на доработку'
+            }.get(status_name, status_name)
+            await callback.message.edit_text(f"✅ Статус проблемы изменен на: {status_display}")
+            # Возвращаемся к редактированию заявления
+            app = await get_application_by_id(app_id)
+            if app:
+                await admin_edit_application_menu(callback, state)
+        else:
+            await callback.message.edit_text("❌ Ошибка при изменении статуса проблемы", reply_markup=admin_cancel_keyboard())
+
+@router.callback_query(F.data.startswith("admin_delete_application_"))
+async def admin_delete_application_confirm(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    app_id = int(callback.data.replace("admin_delete_application_", ""))
+    app = await get_application_by_id(app_id)
+    
+    if not app:
+        await callback.message.edit_text(
+            "Заявление не найдено.",
+            reply_markup=admin_search_applications_keyboard()
+        )
+        return
+    
+    # Создаем клавиатуру подтверждения
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑️ Да, удалить", callback_data=f"admin_confirm_delete_{app_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_edit_application_{app_id}")]
+    ])
+    
+    await callback.message.edit_text(
+        f"⚠️ Вы уверены, что хотите удалить заявление?\n\n"
+        f"ID: {app.id}\n"
+        f"ФИО: {app.fio}\n"
+        f"Очередь: {app.queue_type}\n"
+        f"Статус: {app.status.value}",
+        reply_markup=keyboard
+    )
+
+@router.callback_query(F.data.startswith("admin_confirm_delete_"))
+async def admin_confirm_delete_application(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    app_id = int(callback.data.replace("admin_confirm_delete_", ""))
+    
+    success = await delete_application(app_id)
+    if success:
+        await callback.message.edit_text(
+            f"✅ Заявление {app_id} удалено.",
+            reply_markup=admin_search_applications_keyboard()
+        )
+    else:
+        await callback.message.edit_text(
+            "❌ Ошибка при удалении заявления.",
+            reply_markup=admin_search_applications_keyboard()
+        ) 

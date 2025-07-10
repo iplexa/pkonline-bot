@@ -732,4 +732,48 @@ async def update_problem_status(app_id: int, status: str, comment: str = None, r
         else:
             app.problem_status = ProblemStatusEnum.NEW
         await session.commit()
-        return app 
+        return app
+
+async def search_applications_by_fio(fio: str):
+    """Поиск заявлений по ФИО во всех очередях"""
+    async for session in get_session():
+        stmt = select(Application).where(
+            Application.fio.ilike(f"%{fio}%")
+        ).options(selectinload(Application.processed_by)).order_by(Application.submitted_at.desc())
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+async def update_application_field(app_id: int, field: str, value):
+    """Обновить любое поле заявления"""
+    async for session in get_session():
+        stmt = select(Application).where(Application.id == app_id)
+        result = await session.execute(stmt)
+        app = result.scalars().first()
+        if not app:
+            return False
+        
+        if hasattr(app, field):
+            setattr(app, field, value)
+            await session.commit()
+            return True
+        return False
+
+async def delete_application(app_id: int):
+    """Удалить заявление"""
+    async for session in get_session():
+        stmt = select(Application).where(Application.id == app_id)
+        result = await session.execute(stmt)
+        app = result.scalars().first()
+        if not app:
+            return False
+        
+        await session.delete(app)
+        await session.commit()
+        return True
+
+async def get_all_employees():
+    """Получить всех сотрудников для назначения ответственных"""
+    async for session in get_session():
+        stmt = select(Employee).order_by(Employee.fio)
+        result = await session.execute(stmt)
+        return result.scalars().all() 

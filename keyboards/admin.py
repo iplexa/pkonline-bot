@@ -4,6 +4,7 @@ def admin_main_menu_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👥 Управление сотрудниками", callback_data="admin_staff_menu")],
         [InlineKeyboardButton(text="📋 Управление очередями", callback_data="admin_queue_menu")],
+        [InlineKeyboardButton(text="🔍 Поиск и редактирование заявлений", callback_data="admin_search_applications")],
         [InlineKeyboardButton(text="📊 Отчеты", callback_data="admin_reports_menu")],
         [InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]
     ])
@@ -60,4 +61,56 @@ def admin_queue_pagination_keyboard(queue_type: str, page: int, total_pages: int
             row.append(InlineKeyboardButton(text="▶️", callback_data=f"admin_queue_page_{queue_type}_{page+1}"))
         buttons.append(row)
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_queue_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons) 
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def admin_search_applications_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔍 Поиск по ФИО", callback_data="admin_search_by_fio")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_menu")]
+    ])
+
+def admin_application_edit_keyboard(app_id: int):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Изменить ФИО", callback_data=f"admin_edit_fio_{app_id}")],
+        [InlineKeyboardButton(text="📅 Изменить дату подачи", callback_data=f"admin_edit_date_{app_id}")],
+        [InlineKeyboardButton(text="🔄 Изменить очередь", callback_data=f"admin_edit_queue_{app_id}")],
+        [InlineKeyboardButton(text="📊 Изменить статус", callback_data=f"admin_edit_status_{app_id}")],
+        [InlineKeyboardButton(text="💬 Изменить причину", callback_data=f"admin_edit_reason_{app_id}")],
+        [InlineKeyboardButton(text="👤 Назначить ответственного", callback_data=f"admin_edit_responsible_{app_id}")],
+        [InlineKeyboardButton(text="⚠️ Изменить статус проблемы", callback_data=f"admin_edit_problem_status_{app_id}")],
+        [InlineKeyboardButton(text="🗑️ Удалить заявление", callback_data=f"admin_delete_application_{app_id}")],
+        [InlineKeyboardButton(text="🔙 Назад к поиску", callback_data="admin_search_applications")]
+    ])
+
+def admin_queue_choice_keyboard(app_id: int):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="ЛК", callback_data=f"admin_set_queue_lk_{app_id}")],
+        [InlineKeyboardButton(text="ЕПГУ", callback_data=f"admin_set_queue_epgu_{app_id}")],
+        [InlineKeyboardButton(text="ЕПГУ (почта)", callback_data=f"admin_set_queue_epgu_mail_{app_id}")],
+        [InlineKeyboardButton(text="ЕПГУ (проблемы)", callback_data=f"admin_set_queue_epgu_problem_{app_id}")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data=f"admin_edit_application_{app_id}")]
+    ])
+
+def admin_status_choice_keyboard(app_id: int):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏳ В очереди", callback_data=f"admin_set_status_queued_{app_id}")],
+        [InlineKeyboardButton(text="🔄 В обработке", callback_data=f"admin_set_status_in_progress_{app_id}")],
+        [InlineKeyboardButton(text="✅ Принято", callback_data=f"admin_set_status_accepted_{app_id}")],
+        [InlineKeyboardButton(text="❌ Отклонено", callback_data=f"admin_set_status_rejected_{app_id}")],
+        [InlineKeyboardButton(text="⚠️ Проблема", callback_data=f"admin_set_status_problem_{app_id}")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data=f"admin_edit_application_{app_id}")]
+    ])
+
+def admin_problem_status_choice_keyboard(app_id: int):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🆕 Новое", callback_data=f"admin_set_problem_status_new_{app_id}")],
+        [InlineKeyboardButton(text="🔄 В процессе решения", callback_data=f"admin_set_problem_status_in_progress_{app_id}")],
+        [InlineKeyboardButton(text="✅ Решено", callback_data=f"admin_set_problem_status_solved_{app_id}")],
+        [InlineKeyboardButton(text="📤 Решено, отправлено на доработку", callback_data=f"admin_set_problem_status_solved_return_{app_id}")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data=f"admin_edit_application_{app_id}")]
+    ])
+
+def admin_cancel_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_search_applications")]
+    ]) 

@@ -19,8 +19,8 @@ def work_status_keyboard(status: str):
         buttons.append([InlineKeyboardButton(text="🔴 Завершить рабочий день", callback_data="end_work_day")])
     elif status == "finished":
         buttons.append([InlineKeyboardButton(text="🟢 Начать новый день", callback_data="start_work_day")])
+        buttons.append([InlineKeyboardButton(text="📊 Мой отчет", callback_data="work_report")])
     
-    buttons.append([InlineKeyboardButton(text="📊 Мой отчет", callback_data="work_report")])
     buttons.append([InlineKeyboardButton(text="Меню", callback_data="main_menu")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons) 

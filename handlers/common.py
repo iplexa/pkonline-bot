@@ -80,8 +80,7 @@ async def work_time_menu(callback: CallbackQuery):
             message_text += f"Окончание: {current_work_day.end_time.strftime('%H:%M')}\n"
         message_text += f"Время работы: {work_time_str}\n"
         message_text += f"Время перерывов: {break_time_str}\n"
-        if active_break and active_break.start_time and not active_break.end_time:
-            message_text += f"\n[DEBUG] Активный перерыв: break_id={active_break.id}, start={active_break.start_time.strftime('%H:%M:%S')}\n"
+
         message_text += f"Обработано заявлений: {current_work_day.applications_processed}"
         
         await callback.message.edit_text(message_text, reply_markup=work_status_keyboard(display_status))

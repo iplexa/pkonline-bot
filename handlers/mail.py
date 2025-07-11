@@ -10,12 +10,14 @@ from db.crud import (
     has_access, 
     increment_processed_applications,
     update_application_field,
-    return_application_to_queue
+    return_application_to_queue,
+    get_application_by_id
 )
 from db.models import ApplicationStatusEnum
-from keyboards.mail import mail_menu_keyboard, mail_search_keyboard, mail_confirm_keyboard
+from keyboards.mail import mail_menu_keyboard, mail_search_keyboard, mail_confirm_keyboard, mail_fio_search_keyboard
 from keyboards.main import main_menu_keyboard
 from config import ADMIN_CHAT_ID
+from utils.logger import get_logger
 import logging
 
 logger = logging.getLogger(__name__)
@@ -37,13 +39,15 @@ async def mail_menu_entry(callback: CallbackQuery, state: FSMContext):
             return
         await callback.message.edit_text(
             "📮 Очередь почты. Здесь подтверждается подпись документов.\n\n"
-            "Нажмите кнопку для поиска заявления по ФИО.",
+            "Используйте поиск по ФИО для нахождения заявлений.",
             reply_markup=mail_menu_keyboard()
         )
     except Exception as e:
         await callback.message.answer(f"Ошибка: {e}")
         import traceback
         print(traceback.format_exc())
+
+
 
 @router.callback_query(F.data == "mail_search_fio")
 async def mail_search_fio_start(callback: CallbackQuery, state: FSMContext):
@@ -377,13 +381,18 @@ async def mail_info_fio_process(message: Message, state: FSMContext):
         apps = await get_applications_by_fio_and_queue(fio, queue)
         found.extend(apps)
     if not found:
-        await message.answer(f"Заявления для '{fio}' не найдены ни в одной очереди.", reply_markup=main_menu_keyboard())
+        await message.answer(
+            f"Заявления для '{fio}' не найдены ни в одной очереди.", 
+            reply_markup=mail_fio_search_keyboard()
+        )
         await state.clear()
         return
+    
     # Формируем один большой текст для edit_text
     text = f"<b>Заявления для '{fio}':</b>\n\n"
     for app in found:
         text += f"<b>ID:</b> {app.id}\n"
+        text += f"<b>ФИО:</b> {app.fio}\n"
         text += f"<b>Дата подачи:</b> {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
         text += f"<b>Очередь:</b> {app.queue_type}\n"
         text += f"<b>Статус:</b> {app.status.value if app.status else '-'}\n"
@@ -392,9 +401,10 @@ async def mail_info_fio_process(message: Message, state: FSMContext):
         text += f"<b>Комментарий:</b> {app.problem_comment or '-'}\n"
         text += f"<b>Ответственный:</b> {app.problem_responsible or '-'}\n"
         text += "-----------------------------\n"
-    # Редактируем последнее сообщение пользователя (если возможно)
-    try:
-        await message.answer(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]]))
-    except Exception:
-        await message.answer(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]]))
+    
+    # Добавляем информацию о поисковом запросе
+    text += f"\n🔍 <b>Поисковый запрос:</b> '{fio}'\n"
+    text += f"📊 <b>Найдено заявлений:</b> {len(found)}"
+    
+    await message.answer(text, parse_mode="HTML", reply_markup=mail_fio_search_keyboard())
     await state.clear() 

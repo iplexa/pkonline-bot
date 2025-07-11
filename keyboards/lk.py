@@ -34,5 +34,6 @@ def lk_escalate_keyboard(app_id: int, is_priority: bool):
     buttons = []
     if not is_priority:
         buttons.append([InlineKeyboardButton(text="🚨 Эскалировать", callback_data=f"lk_escalate_{app_id}")])
-    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="lk_search_fio")])
+    buttons.append([InlineKeyboardButton(text="🔍 Найти еще", callback_data="lk_search_fio")])
+    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="lk_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons) 

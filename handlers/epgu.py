@@ -79,7 +79,7 @@ async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
         await update_application_field(app_id, "epgu_processor_id", employee_id)
         result = await increment_processed_applications(employee_id)
         logger.info(f"Заявление ЕПГУ принято: app_id={app_id}, increment_result={result}")
-        await callback.message.edit_text("Заявление принято.", reply_markup=epgu_queue_keyboard(menu=True))
+        await callback.message.edit_text("Заявление принято.", reply_markup=epgu_decision_keyboard(menu=True))
         
         # Логируем событие
         telegram_logger = get_logger()
@@ -102,7 +102,7 @@ async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
         await update_application_field(app_id, "signature_confirmed", False)
         result = await increment_processed_applications(employee_id)
         logger.info(f"Заявление ЕПГУ отправлено на подпись (есть сканы): app_id={app_id}, increment_result={result}")
-        await callback.message.edit_text("Заявление отправлено в очередь почты для подписи.", reply_markup=epgu_queue_keyboard(menu=True))
+        await callback.message.edit_text("Заявление отправлено в очередь почты для подписи.", reply_markup=epgu_decision_keyboard(menu=True))
         
         # Логируем событие
         telegram_logger = get_logger()
@@ -125,7 +125,7 @@ async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
         await update_application_field(app_id, "signature_confirmed", False)
         result = await increment_processed_applications(employee_id)
         logger.info(f"Заявление ЕПГУ отправлено на подпись и запрос сканов: app_id={app_id}, increment_result={result}")
-        await callback.message.edit_text("Заявление отправлено в очередь почты для подписи и запроса сканов.", reply_markup=epgu_queue_keyboard(menu=True))
+        await callback.message.edit_text("Заявление отправлено в очередь почты для подписи и запроса сканов.", reply_markup=epgu_decision_keyboard(menu=True))
         
         # Логируем событие
         telegram_logger = get_logger()
@@ -148,7 +148,7 @@ async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
         await update_application_field(app_id, "signature_confirmed", True)
         result = await increment_processed_applications(employee_id)
         logger.info(f"Заявление ЕПГУ отправлено в очередь почты (только сканы): app_id={app_id}, increment_result={result}")
-        await callback.message.edit_text("Заявление отправлено в очередь почты для получения сканов (подпись не требуется).", reply_markup=epgu_queue_keyboard(menu=True))
+        await callback.message.edit_text("Заявление отправлено в очередь почты для получения сканов (подпись не требуется).", reply_markup=epgu_decision_keyboard(menu=True))
         
         # Логируем событие
         telegram_logger = get_logger()
@@ -169,7 +169,7 @@ async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
     elif callback.data == "return_epgu":
         # Вернуть в очередь
         await return_application_to_queue(app_id)
-        await callback.message.edit_text("Заявление возвращено в очередь.", reply_markup=epgu_queue_keyboard(menu=True))
+        await callback.message.edit_text("Заявление возвращено в очередь.", reply_markup=epgu_decision_keyboard(menu=True))
         await state.clear()
 
 @router.callback_query(EPGUStates.waiting_reason, F.data == "epgu_cancel_reason")
@@ -208,7 +208,7 @@ async def process_epgu_reason(message: Message, state: FSMContext):
         result = await increment_processed_applications(employee_id)
         logger.info(f"Заявление ЕПГУ помечено как проблемное: app_id={app_id}, increment_result={result}")
         
-        await message.answer(f"Заявление помечено как проблемное. Причина: {reason}", reply_markup=epgu_queue_keyboard(menu=True))
+        await message.answer(f"Заявление помечено как проблемное. Причина: {reason}", reply_markup=epgu_decision_keyboard(menu=True))
         
         # Логируем событие
         telegram_logger = get_logger()
@@ -227,7 +227,7 @@ async def block_menu_exit_during_processing(callback: CallbackQuery, state: FSMC
 @router.callback_query(F.data == "epgu_search_fio")
 async def epgu_search_fio_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(EPGUStates.waiting_search_fio)
-    await callback.message.edit_text("Введите ФИО для поиска заявлений:", reply_markup=epgu_queue_keyboard(menu=True))
+    await callback.message.edit_text("Введите ФИО для поиска заявлений:", reply_markup=epgu_decision_keyboard(menu=True))
 
 @router.message(EPGUStates.waiting_search_fio)
 async def epgu_search_fio_process(message: Message, state: FSMContext):
@@ -236,11 +236,11 @@ async def epgu_search_fio_process(message: Message, state: FSMContext):
         return
     fio = message.text.strip()
     if not fio:
-        await message.answer("Пожалуйста, введите ФИО.", reply_markup=epgu_queue_keyboard(menu=True))
+        await message.answer("Пожалуйста, введите ФИО.", reply_markup=epgu_decision_keyboard(menu=True))
         return
     apps = await get_applications_by_fio_and_queue(fio, "epgu")
     if not apps:
-        await message.answer(f"Заявления для '{fio}' не найдены.", reply_markup=epgu_queue_keyboard(menu=True))
+        await message.answer(f"Заявления для '{fio}' не найдены.", reply_markup=epgu_decision_keyboard(menu=True))
         await state.clear()
         return
     for app in apps:
@@ -249,6 +249,7 @@ async def epgu_search_fio_process(message: Message, state: FSMContext):
         text += f"📅 Дата подачи: {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
         if app.is_priority:
             text += "🚨 ПРИОРИТЕТНОЕ\n"
+        text += f"🔍 Поисковый запрос: '{fio}'\n"
         await message.answer(text, reply_markup=epgu_escalate_keyboard(app.id, app.is_priority))
     await state.clear()
 
@@ -266,6 +267,6 @@ async def epgu_escalate_handler(callback: CallbackQuery):
         logger = get_logger()
         if logger and app:
             await logger.log_escalation(app.id, app.queue_type, emp.fio, reason="Эскалация через поиск по ФИО")
-        await callback.message.edit_text(f"✅ Заявление {app_id} эскалировано (приоритетное)", reply_markup=epgu_queue_keyboard(menu=True))
+        await callback.message.edit_text(f"✅ Заявление {app_id} эскалировано (приоритетное)", reply_markup=epgu_decision_keyboard(menu=True))
     else:
-        await callback.message.edit_text("❌ Не удалось эскалировать заявление.", reply_markup=epgu_queue_keyboard(menu=True)) 
+        await callback.message.edit_text("❌ Не удалось эскалировать заявление.", reply_markup=epgu_decision_keyboard(menu=True)) 

@@ -118,7 +118,7 @@ async def process_lk_reason(message: Message, state: FSMContext):
         logger.info(f"Заявление отклонено: app_id={app_id}, increment_result={result}")
     
     status_text = "отклонено" if status == ApplicationStatusEnum.REJECTED else "помечено как проблемное"
-    await message.answer(f"Заявление {status_text}. Причина: {reason}", reply_markup=lk_queue_keyboard(menu=True))
+    await message.answer(f"Заявление {status_text}. Причина: {reason}", reply_markup=lk_decision_keyboard(menu=True))
     
     # Логируем событие
     telegram_logger = get_logger()
@@ -140,7 +140,7 @@ async def block_menu_exit_during_processing(callback: CallbackQuery, state: FSMC
 @router.callback_query(F.data == "lk_search_fio")
 async def lk_search_fio_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(LKStates.waiting_search_fio)
-    await callback.message.edit_text("Введите ФИО для поиска заявлений:", reply_markup=lk_queue_keyboard(menu=True))
+    await callback.message.edit_text("Введите ФИО для поиска заявлений:", reply_markup=lk_decision_keyboard(menu=True))
 
 @router.message(LKStates.waiting_search_fio)
 async def lk_search_fio_process(message: Message, state: FSMContext):
@@ -149,11 +149,11 @@ async def lk_search_fio_process(message: Message, state: FSMContext):
         return
     fio = message.text.strip()
     if not fio:
-        await message.answer("Пожалуйста, введите ФИО.", reply_markup=lk_queue_keyboard(menu=True))
+        await message.answer("Пожалуйста, введите ФИО.", reply_markup=lk_decision_keyboard(menu=True))
         return
     apps = await get_applications_by_fio_and_queue(fio, "lk")
     if not apps:
-        await message.answer(f"Заявления для '{fio}' не найдены.", reply_markup=lk_queue_keyboard(menu=True))
+        await message.answer(f"Заявления для '{fio}' не найдены.", reply_markup=lk_decision_keyboard(menu=True))
         await state.clear()
         return
     for app in apps:
@@ -162,6 +162,7 @@ async def lk_search_fio_process(message: Message, state: FSMContext):
         text += f"📅 Дата подачи: {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
         if app.is_priority:
             text += "🚨 ПРИОРИТЕТНОЕ\n"
+        text += f"🔍 Поисковый запрос: '{fio}'\n"
         await message.answer(text, reply_markup=lk_escalate_keyboard(app.id, app.is_priority))
     await state.clear()
 
@@ -179,6 +180,6 @@ async def lk_escalate_handler(callback: CallbackQuery):
         logger = get_logger()
         if logger and app:
             await logger.log_escalation(app.id, app.queue_type, emp.fio, reason="Эскалация через поиск по ФИО")
-        await callback.message.edit_text(f"✅ Заявление {app_id} эскалировано (приоритетное)", reply_markup=lk_queue_keyboard(menu=True))
+        await callback.message.edit_text(f"✅ Заявление {app_id} эскалировано (приоритетное)", reply_markup=lk_decision_keyboard(menu=True))
     else:
-        await callback.message.edit_text("❌ Не удалось эскалировать заявление.", reply_markup=lk_queue_keyboard(menu=True)) 
+        await callback.message.edit_text("❌ Не удалось эскалировать заявление.", reply_markup=lk_decision_keyboard(menu=True)) 

@@ -845,14 +845,14 @@ async def get_problem_applications(queue_type: str):
     async for session in get_session():
         stmt = select(Application).where(
             Application.queue_type == f"{queue_type}_problem"
-        ).order_by(Application.submitted_at.asc())
+        ).options(selectinload(Application.processed_by)).order_by(Application.submitted_at.asc())
         result = await session.execute(stmt)
         return result.scalars().all()
 
 async def get_application_by_id(app_id: int):
     """Получить заявление по ID"""
     async for session in get_session():
-        stmt = select(Application).where(Application.id == app_id)
+        stmt = select(Application).where(Application.id == app_id).options(selectinload(Application.processed_by))
         result = await session.execute(stmt)
         return result.scalars().first()
 

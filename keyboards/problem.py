@@ -28,7 +28,7 @@ def problem_action_keyboard(app_id):
         [InlineKeyboardButton(text="Назад", callback_data="problem_menu")]
     ])
 
-def problem_status_keyboard(app_id):
+def problem_status_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Решено", callback_data=f"problem_status_solved")],
         [InlineKeyboardButton(text="↩️ Решено и в очередь", callback_data=f"problem_status_solved_return")],

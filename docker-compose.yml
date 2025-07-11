@@ -18,6 +18,13 @@ services:
       - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
       - ./pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
     command: postgres -c config_file=/etc/postgresql/postgresql.conf -c hba_file=/etc/postgresql/pg_hba.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-pkonline}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pkonline-network
 
   bot:
     build: .
@@ -52,13 +59,85 @@ services:
       THREAD_QUEUE_UPDATED: ${THREAD_QUEUE_UPDATED:-0}
       THREAD_ESCALATION: ${THREAD_ESCALATION:-0}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     restart: always
     volumes:
       - .:/app
+    networks:
+      - pkonline-network
+
+  web-backend:
+    build: 
+      context: .
+      dockerfile: web/backend/Dockerfile
+    container_name: pkonline-web-backend
+    restart: always
+    environment:
+      # Настройки БД (используем существующую БД)
+      USE_EXTERNAL_DB: ${USE_EXTERNAL_DB:-false}
+      DB_DSN: ${DB_DSN}
+      EXTERNAL_DB_HOST: ${EXTERNAL_DB_HOST}
+      EXTERNAL_DB_PORT: ${EXTERNAL_DB_PORT:-5432}
+      EXTERNAL_DB_NAME: ${EXTERNAL_DB_NAME}
+      EXTERNAL_DB_USER: ${EXTERNAL_DB_USER}
+      EXTERNAL_DB_PASSWORD: ${EXTERNAL_DB_PASSWORD}
+      EXTERNAL_DB_SSL: ${EXTERNAL_DB_SSL:-false}
+      # Настройки веб-интерфейса
+      SECRET_KEY: ${WEB_SECRET_KEY:-your-secret-key-change-in-production}
+      DEBUG: ${WEB_DEBUG:-false}
+      # Часовой пояс
+      TZ: Europe/Moscow
+    ports:
+      - "8000:8000"
+    networks:
+      - pkonline-network
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  web-frontend:
+    build: 
+      context: ./web/frontend
+      dockerfile: Dockerfile
+    container_name: pkonline-web-frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      web-backend:
+        condition: service_healthy
+    networks:
+      - pkonline-network
+
+  # Альтернативный сервис для разработки (без Nginx)
+  web-frontend-dev:
+    build: 
+      context: ./web/frontend
+      dockerfile: Dockerfile.dev
+    container_name: pkonline-web-frontend-dev
+    restart: always
+    ports:
+      - "3001:3000"
+    depends_on:
+      - web-backend
+    networks:
+      - pkonline-network
+    profiles:
+      - dev
 
 volumes:
   pgdata:
     # Именованный volume для сохранения данных БД
     # Данные сохраняются между пересборками контейнеров
-    driver: local 
+    driver: local
+
+networks:
+  pkonline-network:
+    driver: bridge 

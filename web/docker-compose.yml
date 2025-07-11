@@ -1,0 +1,51 @@
+version: '3.9'
+
+services:
+  web-backend:
+    build: 
+      context: ../../
+      dockerfile: web/backend/Dockerfile
+    container_name: pkonline-web-backend
+    restart: always
+    environment:
+      # Настройки БД (используем существующую БД)
+      USE_EXTERNAL_DB: ${USE_EXTERNAL_DB:-false}
+      DB_DSN: ${DB_DSN}
+      EXTERNAL_DB_HOST: ${EXTERNAL_DB_HOST}
+      EXTERNAL_DB_PORT: ${EXTERNAL_DB_PORT:-5432}
+      EXTERNAL_DB_NAME: ${EXTERNAL_DB_NAME}
+      EXTERNAL_DB_USER: ${EXTERNAL_DB_USER}
+      EXTERNAL_DB_PASSWORD: ${EXTERNAL_DB_PASSWORD}
+      EXTERNAL_DB_SSL: ${EXTERNAL_DB_SSL:-false}
+      # Настройки веб-интерфейса
+      SECRET_KEY: ${WEB_SECRET_KEY:-your-secret-key-change-in-production}
+      DEBUG: ${WEB_DEBUG:-false}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../:/app/../../
+    networks:
+      - pkonline-network
+    depends_on:
+      - db
+
+  web-frontend:
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pkonline-web-frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - web-backend
+    networks:
+      - pkonline-network
+
+  # Подключение к существующей БД
+  db:
+    external: true
+
+networks:
+  pkonline-network:
+    external: true 

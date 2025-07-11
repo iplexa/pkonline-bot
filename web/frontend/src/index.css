@@ -1,0 +1,62 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f8f9fa;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+.dashboard-card {
+  transition: transform 0.2s;
+}
+
+.dashboard-card:hover {
+  transform: translateY(-2px);
+}
+
+.status-badge {
+  font-size: 0.8rem;
+}
+
+.employee-card {
+  border-left: 4px solid #007bff;
+}
+
+.employee-card.working {
+  border-left-color: #28a745;
+}
+
+.employee-card.break {
+  border-left-color: #ffc107;
+}
+
+.employee-card.offline {
+  border-left-color: #6c757d;
+}
+
+.queue-statistics {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.application-item {
+  border-left: 3px solid #007bff;
+  transition: all 0.2s;
+}
+
+.application-item:hover {
+  background-color: #f8f9fa;
+  transform: translateX(2px);
+}
+
+.login-container {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+} 

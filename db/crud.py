@@ -66,27 +66,6 @@ async def cleanup_expired_applications():
 
 async def get_next_application(queue_type: str, employee_id: int = None, bot=None):
     async for session in get_session():
-        # Сначала очищаем просроченные заявления
-        expired_apps = await cleanup_expired_applications()
-        
-        # Отправляем уведомления о возвращённых заявлениях
-        if expired_apps and bot:
-            from config import ADMIN_CHAT_ID
-            for app_info in expired_apps:
-                # Уведомление в админ-чат
-                admin_msg = f"⚠️ Заявление {app_info['app_id']} ({app_info['fio']}) возвращено в очередь {app_info['queue_type']} по истечении времени"
-                if app_info['employee_fio']:
-                    admin_msg += f"\nСотрудник: {app_info['employee_fio']}"
-                await bot.send_message(ADMIN_CHAT_ID, admin_msg)
-                
-                # Уведомление сотруднику
-                if app_info['employee_tg_id']:
-                    try:
-                        employee_msg = f"⚠️ Заявление {app_info['app_id']} ({app_info['fio']}) возвращено в очередь по истечении времени обработки (1 час)"
-                        await bot.send_message(app_info['employee_tg_id'], employee_msg)
-                    except Exception:
-                        pass  # Игнорируем ошибки отправки сотруднику
-        
         stmt = select(Application).where(
             Application.queue_type == queue_type,
             Application.status == ApplicationStatusEnum.QUEUED
@@ -120,19 +99,22 @@ async def update_application_status(app_id: int, status: ApplicationStatusEnum, 
                     status=status,
                     status_reason=reason,
                     processed_by_id=employee_id,
-                    queue_type=new_queue_type
+                    queue_type=new_queue_type,
+                    processed_at=get_moscow_now() if status in [ApplicationStatusEnum.ACCEPTED, ApplicationStatusEnum.REJECTED, ApplicationStatusEnum.PROBLEM] else None
                 )
             else:
                 stmt = update(Application).where(Application.id == app_id).values(
                     status=status,
                     status_reason=reason,
-                    processed_by_id=employee_id
+                    processed_by_id=employee_id,
+                    processed_at=get_moscow_now() if status in [ApplicationStatusEnum.ACCEPTED, ApplicationStatusEnum.REJECTED, ApplicationStatusEnum.PROBLEM] else None
                 )
         else:
             stmt = update(Application).where(Application.id == app_id).values(
                 status=status,
                 status_reason=reason,
-                processed_by_id=employee_id
+                processed_by_id=employee_id,
+                processed_at=get_moscow_now() if status in [ApplicationStatusEnum.ACCEPTED, ApplicationStatusEnum.REJECTED, ApplicationStatusEnum.PROBLEM] else None
             )
         
         await session.execute(stmt)
@@ -723,27 +705,6 @@ async def get_all_work_days_report(report_date: date = None):
 async def get_next_epgu_application(employee_id: int = None, bot=None):
     """Получить следующее заявление из очереди ЕПГУ (не отложенное)"""
     async for session in get_session():
-        # Сначала очищаем просроченные заявления
-        expired_apps = await cleanup_expired_applications()
-        
-        # Отправляем уведомления о возвращённых заявлениях
-        if expired_apps and bot:
-            from config import ADMIN_CHAT_ID
-            for app_info in expired_apps:
-                # Уведомление в админ-чат
-                admin_msg = f"⚠️ Заявление {app_info['app_id']} ({app_info['fio']}) возвращено в очередь {app_info['queue_type']} по истечении времени"
-                if app_info['employee_fio']:
-                    admin_msg += f"\nСотрудник: {app_info['employee_fio']}"
-                await bot.send_message(ADMIN_CHAT_ID, admin_msg)
-                
-                # Уведомление сотруднику
-                if app_info['employee_tg_id']:
-                    try:
-                        employee_msg = f"⚠️ Заявление {app_info['app_id']} ({app_info['fio']}) возвращено в очередь по истечении времени обработки (1 час)"
-                        await bot.send_message(app_info['employee_tg_id'], employee_msg)
-                    except Exception:
-                        pass
-        
         # Получаем заявление из очереди ЕПГУ, которое не отложено
         now = get_moscow_now()
         stmt = select(Application).where(
@@ -1151,4 +1112,28 @@ async def create_database_backup():
         # Удаляем временный файл в случае ошибки
         if 'backup_file' in locals() and os.path.exists(backup_file):
             os.unlink(backup_file)
-        raise Exception(f"Ошибка при создании бэкапа: {str(e)}") 
+        raise Exception(f"Ошибка при создании бэкапа: {str(e)}")
+
+async def manual_cleanup_expired_applications(bot=None):
+    """Ручная очистка просроченных заявлений с отправкой уведомлений"""
+    expired_apps = await cleanup_expired_applications()
+    
+    # Отправляем уведомления о возвращённых заявлениях
+    if expired_apps and bot:
+        from config import ADMIN_CHAT_ID
+        for app_info in expired_apps:
+            # Уведомление в админ-чат
+            admin_msg = f"⚠️ Заявление {app_info['app_id']} ({app_info['fio']}) возвращено в очередь {app_info['queue_type']} по истечении времени"
+            if app_info['employee_fio']:
+                admin_msg += f"\nСотрудник: {app_info['employee_fio']}"
+            await bot.send_message(ADMIN_CHAT_ID, admin_msg)
+            
+            # Уведомление сотруднику
+            if app_info['employee_tg_id']:
+                try:
+                    employee_msg = f"⚠️ Заявление {app_info['app_id']} ({app_info['fio']}) возвращено в очередь по истечении времени обработки (1 час)"
+                    await bot.send_message(app_info['employee_tg_id'], employee_msg)
+                except Exception:
+                    pass  # Игнорируем ошибки отправки сотруднику
+    
+    return expired_apps 

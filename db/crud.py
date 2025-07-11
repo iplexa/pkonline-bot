@@ -398,28 +398,27 @@ async def start_break(employee_id: int):
     async for session in get_session():
         work_day = await get_current_work_day(employee_id)
         if not work_day:
+            logger.warning(f"[start_break] Нет рабочего дня для employee_id={employee_id}")
             return None
-        
         # Проверяем, нет ли уже активного перерыва
         active_break = await get_active_break(work_day.id)
         if active_break:
+            logger.warning(f"[start_break] Уже есть активный перерыв: break_id={active_break.id}, work_day_id={work_day.id}")
             return None
-        
         # Обновляем общее время работы до начала перерыва
         if work_day.start_time and work_day.status.value == "active":
             current_time = get_moscow_now()
             elapsed_seconds = int((current_time - work_day.start_time).total_seconds())
             work_day.total_work_time = elapsed_seconds - work_day.total_break_time
-        
         # Устанавливаем статус как приостановленный
         work_day.status = WorkDayStatusEnum.PAUSED
-        
         work_break = WorkBreak(
             work_day_id=work_day.id,
             start_time=get_moscow_now()
         )
         session.add(work_break)
         await session.commit()
+        logger.info(f"[start_break] Новый перерыв: break_id={work_break.id}, work_day_id={work_day.id}, start_time={work_break.start_time}")
         return work_break
 
 async def end_break(employee_id: int):
@@ -427,22 +426,24 @@ async def end_break(employee_id: int):
     async for session in get_session():
         work_day = await get_current_work_day(employee_id)
         if not work_day:
+            print(f"[end_break] Нет рабочего дня для employee_id={employee_id}")
             return None
-        active_break = await get_active_break(work_day.id)
-        if not active_break:
+        work_break = await get_active_break(work_day.id)
+        if not work_break:
+            # Для диагностики: вывести все перерывы этого дня
+            stmt = select(WorkBreak).where(WorkBreak.work_day_id == work_day.id)
+            result = await session.execute(stmt)
+            all_breaks = result.scalars().all()
+            print(f"[end_break] Нет активного перерыва. Все перерывы: {[{'id': b.id, 'start': b.start_time, 'end': b.end_time} for b in all_breaks]}")
             return None
-        active_break.end_time = get_moscow_now()
-        active_break.duration = int((active_break.end_time - active_break.start_time).total_seconds())
-        work_day.total_break_time += active_break.duration
-        # Пересчитываем total_work_time после завершения перерыва
-        if work_day.start_time and work_day.status.value == "paused":
-            current_time = get_moscow_now()
-            elapsed_seconds = int((current_time - work_day.start_time).total_seconds())
-            work_day.total_work_time = elapsed_seconds - work_day.total_break_time
-        # Возвращаем статус как активный
+        current_time = get_moscow_now()
+        work_break.end_time = current_time
+        work_break.duration = int((work_break.end_time - work_break.start_time).total_seconds())
+        work_day.total_break_time += work_break.duration
         work_day.status = WorkDayStatusEnum.ACTIVE
         await session.commit()
-        return active_break
+        logger.info(f"[end_break] Завершен перерыв: break_id={work_break.id}, work_day_id={work_day.id}, start={work_break.start_time}, end={work_break.end_time}, duration={work_break.duration}")
+        return work_break
 
 async def get_active_break(work_day_id: int):
     """Получить активный перерыв для рабочего дня"""
@@ -452,7 +453,12 @@ async def get_active_break(work_day_id: int):
             WorkBreak.end_time.is_(None)
         )
         result = await session.execute(stmt)
-        return result.scalars().first()
+        break_obj = result.scalars().first()
+        if break_obj:
+            logger.info(f"[get_active_break] Найден активный перерыв: break_id={break_obj.id}, start={break_obj.start_time}, end={break_obj.end_time}")
+        else:
+            logger.info(f"[get_active_break] Нет активного перерыва для work_day_id={work_day_id}")
+        return break_obj
 
 async def increment_processed_applications(employee_id: int):
     """Увеличить счетчик обработанных заявлений"""
@@ -689,7 +695,7 @@ async def get_applications_by_fio_and_queue(fio: str, queue_type: str):
         stmt = select(Application).where(
             Application.fio.ilike(f"%{fio}%"),
             Application.queue_type == queue_type
-        ).order_by(Application.submitted_at.asc())
+        ).options(selectinload(Application.epgu_processor)).order_by(Application.submitted_at.asc())
         result = await session.execute(stmt)
         return result.scalars().all()
 
@@ -703,7 +709,10 @@ async def get_problem_applications(queue_type: str):
 
 async def get_application_by_id(app_id: int):
     async for session in get_session():
-        stmt = select(Application).where(Application.id == app_id).options(selectinload(Application.processed_by))
+        stmt = select(Application).where(Application.id == app_id).options(
+            selectinload(Application.processed_by),
+            selectinload(Application.epgu_processor)
+        )
         result = await session.execute(stmt)
         return result.scalars().first()
 

@@ -14,7 +14,7 @@ def epgu_queue_keyboard(menu: bool = True) -> InlineKeyboardMarkup:
         ])
 
 def epgu_decision_keyboard(menu: bool = True) -> InlineKeyboardMarkup:
-    """Клавиатура для принятия решения по заявлению ЕПГУ"""
+    """Клавиатура для принятия решения по заявлению ЕПГУ (новая логика)"""
     if menu:
         return InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Получить заявление", callback_data="get_epgu_application")],
@@ -22,10 +22,11 @@ def epgu_decision_keyboard(menu: bool = True) -> InlineKeyboardMarkup:
         ])
     else:
         return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Принято", callback_data="accept_epgu")],
-            [InlineKeyboardButton(text="📝 Принято, отправлено на подпись", callback_data="accept_mail_epgu")],
-            [InlineKeyboardButton(text="📞 Не дозвонились", callback_data="no_call_epgu")],
-            [InlineKeyboardButton(text="⚠️ Проблема", callback_data="problem_epgu")],
+            [InlineKeyboardButton(text="✅ Принято", callback_data="epgu_accept")],
+            [InlineKeyboardButton(text="📄 Есть сканы, на подпись", callback_data="epgu_has_scans")],
+            [InlineKeyboardButton(text="❗ Нет сканов, на подпись и запрос сканов", callback_data="epgu_no_scans")],
+            [InlineKeyboardButton(text="📥 Нет сканов, только сканы (без подписи)", callback_data="epgu_only_scans")],
+            [InlineKeyboardButton(text="⚠️ Ошибка", callback_data="epgu_error")],
             [InlineKeyboardButton(text="🔄 Вернуть в очередь", callback_data="return_epgu")]
         ])
 

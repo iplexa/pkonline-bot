@@ -22,6 +22,13 @@ class ProblemStatusEnum(enum.Enum):
     SOLVED = "решено"
     SOLVED_RETURN = "решено, отправлено на доработку"
 
+class EPGUActionEnum(enum.Enum):
+    ACCEPTED = "ACCEPTED"  # Принято сразу
+    HAS_SCANS = "HAS_SCANS"  # Есть сканы, отправляем на подпись
+    NO_SCANS = "NO_SCANS"  # Нет сканов, отправляем на подпись и запрашиваем сканы
+    ONLY_SCANS = "ONLY_SCANS"  # Нет сканов, подпись не требуется, ждем только сканы
+    ERROR = "ERROR"  # Ошибка
+
 class Application(Base):
     __tablename__ = "applications"
     id = Column(Integer, primary_key=True)
@@ -32,7 +39,7 @@ class Application(Base):
     status_reason = Column(Text, nullable=True)
     queue_type = Column(String, nullable=False)  # 'lk', 'epgu', 'epgu_mail', 'epgu_problem'
     processed_by_id = Column(Integer, ForeignKey('employees.id'), nullable=True)
-    processed_by = relationship("Employee", back_populates="applications")
+    processed_by = relationship("Employee", back_populates="applications", foreign_keys=[processed_by_id])
     taken_at = Column(DateTime, nullable=True)  # Время взятия в обработку
     postponed_until = Column(DateTime, nullable=True)  # Для ЕПГУ: отложено до
     processed_at = Column(DateTime, nullable=True)     # Когда обработано
@@ -40,6 +47,14 @@ class Application(Base):
     problem_status = Column(Enum(ProblemStatusEnum), default=ProblemStatusEnum.NEW)
     problem_comment = Column(Text, nullable=True)
     problem_responsible = Column(String, nullable=True)
+    # Новые поля для ЕПГУ
+    epgu_action = Column(Enum(EPGUActionEnum), nullable=True)  # Действие, которое выбрал сотрудник ЕПГУ
+    epgu_processor_id = Column(Integer, ForeignKey('employees.id'), nullable=True)  # Кто обрабатывал в ЕПГУ
+    epgu_processor = relationship("Employee", foreign_keys=[epgu_processor_id])
+    needs_scans = Column(Boolean, default=False)  # Нужны ли сканы
+    needs_signature = Column(Boolean, default=False)  # Нужна ли подпись
+    scans_confirmed = Column(Boolean, default=False)  # Сканы подтверждены
+    signature_confirmed = Column(Boolean, default=False)  # Подпись подтверждена
 
 class Group(Base):
     __tablename__ = "groups"
@@ -58,7 +73,7 @@ class Employee(Base):
     tg_id = Column(String, unique=True, nullable=False)
     fio = Column(String, nullable=True)
     is_admin = Column(Boolean, default=False)
-    applications = relationship("Application", back_populates="processed_by")
+    applications = relationship("Application", back_populates="processed_by", foreign_keys="Application.processed_by_id")
     groups = relationship("Group", secondary="employee_groups", back_populates="employees")
     work_days = relationship("WorkDay", back_populates="employee")
 

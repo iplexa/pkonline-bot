@@ -8,7 +8,9 @@ from db.crud import (
     update_application_status,
     get_employee_by_tg_id, 
     has_access, 
-    increment_processed_applications
+    increment_processed_applications,
+    update_application_field,
+    return_application_to_queue
 )
 from db.models import ApplicationStatusEnum
 from keyboards.mail import mail_menu_keyboard, mail_search_keyboard, mail_confirm_keyboard
@@ -24,6 +26,8 @@ class MailStates(StatesGroup):
     waiting_fio_search = State()
     waiting_confirm = State()
     waiting_fio_info = State()
+    waiting_scans = State()
+    waiting_signature = State()
 
 @router.callback_query(F.data == "mail_menu")
 async def mail_menu_entry(callback: CallbackQuery, state: FSMContext):
@@ -89,17 +93,28 @@ async def mail_search_fio_process(message: Message, state: FSMContext):
         app = applications[0]
         await state.update_data(app_id=app.id, fio=fio)
         await state.set_state(MailStates.waiting_confirm)
+        # Формируем подробное описание
+        doc_list = []
+        if getattr(app, 'needs_signature', False):
+            doc_list.append("Подпись")
+        if getattr(app, 'needs_scans', False):
+            doc_list.append("Сканы")
+        doc_text = ", ".join(doc_list) if doc_list else "-"
+        epgu_operator = getattr(app, 'epgu_processor', None)
+        epgu_fio = epgu_operator.fio if epgu_operator and hasattr(epgu_operator, 'fio') else "-"
         await message.answer(
             f"📋 Найдено заявление:\n\n"
             f"ФИО: {app.fio}\n"
             f"Дата подачи: {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
-            f"ID: {app.id}\n\n"
-            f"Подтвердите, что документы подписаны и загружены:",
+            f"ID: {app.id}\n"
+            f"Нужно подтвердить: {doc_text}\n"
+            f"Обработал в ЕПГУ: {epgu_fio}\n\n"
+            f"Подтвердите, что все необходимые документы в наличии:",
             reply_markup=mail_confirm_keyboard()
         )
     else:
         # Несколько заявлений - показываем кнопки для выбора
-        text = f"📋 Найдено {len(applications)} заявлений для '{fio}':\n\nВыберите нужное заявление:" 
+        text = f"📋 Найдено {len(applications)} заявлений для '{fio}':\n\nВыберите нужное заявление:"
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text=f"{i+1}. {app.submitted_at.strftime('%d.%m.%Y %H:%M')}", callback_data=f"mail_select_{app.id}")]
@@ -138,58 +153,129 @@ async def mail_confirm_process(message: Message, state: FSMContext):
     emp = await get_employee_by_tg_id(str(message.from_user.id))
     if not emp or not await has_access(str(message.from_user.id), "mail"):
         return
-    
     data = await state.get_data()
     app_id = data.get("app_id")
-    applications = data.get("applications")
     fio = data.get("fio")
-    
-    if app_id:
-        # Одно заявление - подтверждаем
-        if message.text.lower() in ["да", "подтвердить", "подтверждаю", "готово"]:
-            await update_application_status(app_id, ApplicationStatusEnum.ACCEPTED, employee_id=emp.id)
-            result = await increment_processed_applications(emp.id)
-            logger.info(f"Заявление почты подтверждено: app_id={app_id}, increment_result={result}")
+    # Получаем актуальное заявление
+    from db.crud import get_application_by_id
+    app = await get_application_by_id(app_id)
+    # Если нужны сканы — сначала спрашиваем их
+    if getattr(app, 'needs_scans', False) and not getattr(app, 'scans_confirmed', False):
+        await state.set_state(MailStates.waiting_scans)
+        await message.answer(
+            f"Требуются сканы документов. Все сканы в наличии? (да/нет)",
+            reply_markup=mail_confirm_keyboard()
+        )
+        return
+    # Если нужны только подпись — спрашиваем подпись
+    if getattr(app, 'needs_signature', False) and not getattr(app, 'signature_confirmed', False):
+        await state.set_state(MailStates.waiting_signature)
+        await message.answer(
+            f"Требуется подпись. Документы подписаны? (да/нет)",
+            reply_markup=mail_confirm_keyboard()
+        )
+        return
+    # Если ничего не требуется — принимаем
+    await update_application_status(app_id, ApplicationStatusEnum.ACCEPTED, employee_id=emp.id)
+    await update_application_field(app_id, "scans_confirmed", True)
+    await update_application_field(app_id, "signature_confirmed", True)
+    result = await increment_processed_applications(emp.id)
+    logger.info(f"Заявление почты подтверждено: app_id={app_id}, increment_result={result}")
+    await message.answer(
+        f"✅ Заявление {app_id} ({fio}) подтверждено.\nВсе необходимые документы в наличии.",
+        reply_markup=mail_menu_keyboard()
+    )
+    await message.bot.send_message(
+        ADMIN_CHAT_ID, 
+        f"📮 Почта: {message.from_user.full_name} подтвердил заявление {app_id} ({fio})"
+    )
+    await state.clear()
+
+@router.message(MailStates.waiting_scans)
+async def mail_scans_process(message: Message, state: FSMContext):
+    emp = await get_employee_by_tg_id(str(message.from_user.id))
+    data = await state.get_data()
+    app_id = data.get("app_id")
+    fio = data.get("fio")
+    answer = message.text.strip().lower()
+    if answer in ["да", "есть", "подтверждаю", "готово"]:
+        await update_application_field(app_id, "scans_confirmed", True)
+        # Проверяем, нужна ли подпись
+        from db.crud import get_application_by_id
+        app = await get_application_by_id(app_id)
+        if getattr(app, 'needs_signature', False) and not getattr(app, 'signature_confirmed', False):
+            await state.set_state(MailStates.waiting_signature)
             await message.answer(
-                f"✅ Заявление {app_id} ({fio}) подтверждено.\n"
-                f"Документы подписаны и загружены.",
-                reply_markup=mail_menu_keyboard()
+                f"Требуется подпись. Документы подписаны? (да/нет)",
+                reply_markup=mail_confirm_keyboard()
             )
-            await message.bot.send_message(
-                ADMIN_CHAT_ID, 
-                f"📮 Почта: {message.from_user.full_name} подтвердил подпись заявления {app_id} ({fio})"
-            )
-        else:
-            await message.answer(
-                "Отмена подтверждения. Заявление осталось в очереди почты.",
-                reply_markup=mail_menu_keyboard()
-            )
+            return
+        # Если подпись не нужна — завершаем
+        await update_application_status(app_id, ApplicationStatusEnum.ACCEPTED, employee_id=emp.id)
+        await update_application_field(app_id, "signature_confirmed", True)
+        from db.crud import increment_processed_applications
+        result = await increment_processed_applications(emp.id)
+        logger.info(f"Заявление почты подтверждено (сканы): app_id={app_id}, increment_result={result}")
+        await message.answer(
+            f"✅ Заявление {app_id} ({fio}) подтверждено.\nВсе необходимые документы в наличии.",
+            reply_markup=mail_menu_keyboard()
+        )
+        await message.bot.send_message(
+            ADMIN_CHAT_ID, 
+            f"📮 Почта: {message.from_user.full_name} подтвердил заявление {app_id} ({fio}) (сканы)"
+        )
         await state.clear()
-    elif applications:
-        # Несколько заявлений - выбираем по номеру
-        try:
-            choice = int(message.text.strip())
-            if 1 <= choice <= len(applications):
-                app = applications[choice - 1]
-                await state.update_data(app_id=app.id, applications=None)
-                await message.answer(
-                    f"📋 Выбрано заявление:\n\n"
-                    f"ФИО: {app.fio}\n"
-                    f"Дата подачи: {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
-                    f"ID: {app.id}\n\n"
-                    f"Подтвердите, что документы подписаны и загружены:",
-                    reply_markup=mail_confirm_keyboard()
-                )
-            else:
-                await message.answer(
-                    f"Неверный номер. Введите число от 1 до {len(applications)}.",
-                    reply_markup=mail_search_keyboard()
-                )
-        except ValueError:
+    else:
+        # Если сканов нет — возвращаем в очередь почты
+        await update_application_field(app_id, "scans_confirmed", False)
+        await return_application_to_queue(app_id)
+        await message.answer(
+            f"❗ Сканы не подтверждены. Заявление возвращено в очередь почты.",
+            reply_markup=mail_menu_keyboard()
+        )
+        await state.clear()
+
+@router.message(MailStates.waiting_signature)
+async def mail_signature_process(message: Message, state: FSMContext):
+    emp = await get_employee_by_tg_id(str(message.from_user.id))
+    data = await state.get_data()
+    app_id = data.get("app_id")
+    fio = data.get("fio")
+    answer = message.text.strip().lower()
+    if answer in ["да", "есть", "подтверждаю", "готово"]:
+        await update_application_field(app_id, "signature_confirmed", True)
+        # Проверяем, нужны ли сканы и подтверждены ли они
+        from db.crud import get_application_by_id
+        app = await get_application_by_id(app_id)
+        if getattr(app, 'needs_scans', False) and not getattr(app, 'scans_confirmed', False):
+            await state.set_state(MailStates.waiting_scans)
             await message.answer(
-                "Пожалуйста, введите номер заявления (число).",
-                reply_markup=mail_search_keyboard()
+                f"Требуются сканы документов. Все сканы в наличии? (да/нет)",
+                reply_markup=mail_confirm_keyboard()
             )
+            return
+        # Если всё подтверждено — завершаем
+        await update_application_status(app_id, ApplicationStatusEnum.ACCEPTED, employee_id=emp.id)
+        result = await increment_processed_applications(emp.id)
+        logger.info(f"Заявление почты подтверждено (подпись): app_id={app_id}, increment_result={result}")
+        await message.answer(
+            f"✅ Заявление {app_id} ({fio}) подтверждено.\nВсе необходимые документы в наличии.",
+            reply_markup=mail_menu_keyboard()
+        )
+        await message.bot.send_message(
+            ADMIN_CHAT_ID, 
+            f"📮 Почта: {message.from_user.full_name} подтвердил заявление {app_id} ({fio}) (подпись)"
+        )
+        await state.clear()
+    else:
+        # Если подписи нет — возвращаем в очередь почты
+        await update_application_field(app_id, "signature_confirmed", False)
+        await return_application_to_queue(app_id)
+        await message.answer(
+            f"❗ Подпись не подтверждена. Заявление возвращено в очередь почты.",
+            reply_markup=mail_menu_keyboard()
+        )
+        await state.clear()
 
 @router.callback_query(F.data == "mail_back_to_menu")
 async def mail_back_to_menu(callback: CallbackQuery, state: FSMContext):

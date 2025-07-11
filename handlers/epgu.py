@@ -11,9 +11,10 @@ from db.crud import (
     get_employee_by_tg_id, 
     has_access, 
     return_application_to_queue, 
-    increment_processed_applications
+    increment_processed_applications,
+    update_application_field
 )
-from db.models import ApplicationStatusEnum
+from db.models import ApplicationStatusEnum, EPGUActionEnum
 from keyboards.epgu import epgu_queue_keyboard, epgu_decision_keyboard, epgu_reason_keyboard
 from keyboards.main import main_menu_keyboard
 from config import ADMIN_CHAT_ID
@@ -52,7 +53,9 @@ async def get_epgu_application(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(f"Заявление: {app.fio}", reply_markup=epgu_decision_keyboard(menu=False))
     await state.set_state(EPGUStates.waiting_decision)
 
-@router.callback_query(EPGUStates.waiting_decision, F.data.in_(["accept_epgu", "accept_mail_epgu", "no_call_epgu", "problem_epgu", "return_epgu"]))
+@router.callback_query(EPGUStates.waiting_decision, F.data.in_([
+    "epgu_accept", "epgu_has_scans", "epgu_no_scans", "epgu_only_scans", "epgu_error", "return_epgu"
+]))
 async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
     emp = await get_employee_by_tg_id(str(callback.from_user.id))
     if not emp or not await has_access(str(callback.from_user.id), "epgu"):
@@ -60,46 +63,77 @@ async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     app_id = data.get("app_id")
     employee_id = emp.id if emp else None
-    
+
     logger.info(f"Обработка решения ЕПГУ: {callback.data} для app_id={app_id}, employee_id={employee_id}")
-    
-    if callback.data == "accept_epgu":
-        # Принято сразу
+
+    if callback.data == "epgu_accept":
+        # Вариант 1: Принято сразу
         await update_application_status(app_id, ApplicationStatusEnum.ACCEPTED, employee_id=employee_id)
+        # Сохраняем, что обработал сотрудник ЕПГУ
+        await update_application_field(app_id, "epgu_action", EPGUActionEnum.ACCEPTED.value)
+        await update_application_field(app_id, "epgu_processor_id", employee_id)
         result = await increment_processed_applications(employee_id)
         logger.info(f"Заявление ЕПГУ принято: app_id={app_id}, increment_result={result}")
         await callback.message.edit_text("Заявление принято.", reply_markup=epgu_queue_keyboard(menu=True))
         await callback.bot.send_message(ADMIN_CHAT_ID, f"ЕПГУ: {callback.from_user.full_name} принял заявление {app_id}")
         await state.clear()
-        
-    elif callback.data == "accept_mail_epgu":
-        # Принято, отправлено на подпись
+
+    elif callback.data == "epgu_has_scans":
+        # Вариант 2: Есть сканы, отправляем на подпись (в очередь почты)
         await update_application_queue_type(app_id, "epgu_mail", employee_id=employee_id)
+        await update_application_field(app_id, "epgu_action", EPGUActionEnum.HAS_SCANS.value)
+        await update_application_field(app_id, "epgu_processor_id", employee_id)
+        await update_application_field(app_id, "needs_scans", False)
+        await update_application_field(app_id, "needs_signature", True)
+        await update_application_field(app_id, "scans_confirmed", True)
+        await update_application_field(app_id, "signature_confirmed", False)
         result = await increment_processed_applications(employee_id)
-        logger.info(f"Заявление ЕПГУ отправлено на подпись: app_id={app_id}, increment_result={result}")
-        await callback.message.edit_text("Заявление принято, отправлено на подпись.", reply_markup=epgu_queue_keyboard(menu=True))
-        await callback.bot.send_message(ADMIN_CHAT_ID, f"ЕПГУ: {callback.from_user.full_name} отправил заявление {app_id} на подпись")
+        logger.info(f"Заявление ЕПГУ отправлено на подпись (есть сканы): app_id={app_id}, increment_result={result}")
+        await callback.message.edit_text("Заявление отправлено в очередь почты для подписи.", reply_markup=epgu_queue_keyboard(menu=True))
+        await callback.bot.send_message(ADMIN_CHAT_ID, f"ЕПГУ: {callback.from_user.full_name} отправил заявление {app_id} на подпись (есть сканы)")
         await state.clear()
-        
-    elif callback.data == "no_call_epgu":
-        # Не дозвонились - отложить на сутки
-        await postpone_application(app_id, employee_id=employee_id)
-        logger.info(f"Заявление ЕПГУ отложено (не дозвонились): app_id={app_id}")
-        await callback.message.edit_text("Заявление отложено на сутки (не дозвонились).", reply_markup=epgu_queue_keyboard(menu=True))
-        await callback.bot.send_message(ADMIN_CHAT_ID, f"ЕПГУ: {callback.from_user.full_name} не дозвонился по заявлению {app_id}")
+
+    elif callback.data == "epgu_no_scans":
+        # Вариант 3: Нет сканов, отправляем на подпись и запрашиваем сканы (в очередь почты)
+        await update_application_queue_type(app_id, "epgu_mail", employee_id=employee_id)
+        await update_application_field(app_id, "epgu_action", EPGUActionEnum.NO_SCANS.value)
+        await update_application_field(app_id, "epgu_processor_id", employee_id)
+        await update_application_field(app_id, "needs_scans", True)
+        await update_application_field(app_id, "needs_signature", True)
+        await update_application_field(app_id, "scans_confirmed", False)
+        await update_application_field(app_id, "signature_confirmed", False)
+        result = await increment_processed_applications(employee_id)
+        logger.info(f"Заявление ЕПГУ отправлено на подпись и запрос сканов: app_id={app_id}, increment_result={result}")
+        await callback.message.edit_text("Заявление отправлено в очередь почты для подписи и запроса сканов.", reply_markup=epgu_queue_keyboard(menu=True))
+        await callback.bot.send_message(ADMIN_CHAT_ID, f"ЕПГУ: {callback.from_user.full_name} отправил заявление {app_id} на подпись и запрос сканов")
         await state.clear()
-        
+
+    elif callback.data == "epgu_only_scans":
+        # Новый вариант: нужны только сканы, подпись не требуется
+        await update_application_queue_type(app_id, "epgu_mail", employee_id=employee_id)
+        await update_application_field(app_id, "epgu_action", EPGUActionEnum.ONLY_SCANS.value)
+        await update_application_field(app_id, "epgu_processor_id", employee_id)
+        await update_application_field(app_id, "needs_scans", True)
+        await update_application_field(app_id, "needs_signature", False)
+        await update_application_field(app_id, "scans_confirmed", False)
+        await update_application_field(app_id, "signature_confirmed", True)
+        result = await increment_processed_applications(employee_id)
+        logger.info(f"Заявление ЕПГУ отправлено в очередь почты (только сканы): app_id={app_id}, increment_result={result}")
+        await callback.message.edit_text("Заявление отправлено в очередь почты для получения сканов (подпись не требуется).", reply_markup=epgu_queue_keyboard(menu=True))
+        await callback.bot.send_message(ADMIN_CHAT_ID, f"ЕПГУ: {callback.from_user.full_name} отправил заявление {app_id} на получение сканов (без подписи)")
+        await state.clear()
+
+    elif callback.data == "epgu_error":
+        # Вариант 4: Ошибка — запросить причину
+        await state.set_state(EPGUStates.waiting_reason)
+        await state.update_data(decision="epgu_error")
+        await callback.message.edit_text("Укажите причину ошибки:", reply_markup=epgu_reason_keyboard())
+
     elif callback.data == "return_epgu":
         # Вернуть в очередь
         await return_application_to_queue(app_id)
         await callback.message.edit_text("Заявление возвращено в очередь.", reply_markup=epgu_queue_keyboard(menu=True))
         await state.clear()
-        
-    elif callback.data == "problem_epgu":
-        # Проблема - запросить описание
-        await state.set_state(EPGUStates.waiting_reason)
-        await state.update_data(decision=callback.data)
-        await callback.message.edit_text("Укажите причину проблемы:", reply_markup=epgu_reason_keyboard())
 
 @router.callback_query(EPGUStates.waiting_reason, F.data == "epgu_cancel_reason")
 async def cancel_epgu_reason(callback: CallbackQuery, state: FSMContext):
@@ -131,7 +165,7 @@ async def process_epgu_reason(message: Message, state: FSMContext):
     
     logger.info(f"Обработка причины ЕПГУ: decision={decision}, app_id={app_id}, employee_id={employee_id}")
     
-    if decision == "problem_epgu":
+    if decision == "epgu_error":
         # Перевести в очередь проблем
         await update_application_queue_type(app_id, "epgu_problem", employee_id=employee_id, reason=reason)
         result = await increment_processed_applications(employee_id)

@@ -8,10 +8,16 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Настройки для внешнего доступа
+      POSTGRES_HOST_AUTH_METHOD: md5
     ports:
-      - "5432:5432"
+      - "5432:5432"  # Порт для внешнего доступа
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Конфигурация PostgreSQL для внешнего доступа
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf -c hba_file=/etc/postgresql/pg_hba.conf
 
   bot:
     build: .
@@ -52,4 +58,7 @@ services:
       - .:/app
 
 volumes:
-  pgdata: 
+  pgdata:
+    # Именованный volume для сохранения данных БД
+    # Данные сохраняются между пересборками контейнеров
+    driver: local 

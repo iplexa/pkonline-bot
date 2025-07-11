@@ -14,9 +14,11 @@ def admin_staff_menu_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Добавить сотрудника", callback_data="admin_add_employee")],
         [InlineKeyboardButton(text="➕ Добавить тестовых сотрудников", callback_data="admin_add_test_employees")],
+        [InlineKeyboardButton(text="✏️ Изменить ФИО сотрудника", callback_data="admin_edit_employee_fio")],
         [InlineKeyboardButton(text="➖ Удалить сотрудника", callback_data="admin_remove_employee")],
         [InlineKeyboardButton(text="➕ Добавить группу сотруднику", callback_data="admin_add_group")],
         [InlineKeyboardButton(text="➖ Удалить группу у сотрудника", callback_data="admin_remove_group")],
+        [InlineKeyboardButton(text="⏰ Управление рабочим временем", callback_data="admin_work_time_management")],
         [InlineKeyboardButton(text="📋 Список сотрудников", callback_data="admin_list_employees")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_menu")]
     ])
@@ -142,4 +144,19 @@ def admin_thread_settings_keyboard():
         [InlineKeyboardButton(text="📊 Очереди - Обновления", callback_data="admin_set_thread_queue_updated")],
         [InlineKeyboardButton(text="🚨 Эскалация", callback_data="admin_set_thread_escalation")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_chat_settings")]
+    ])
+
+def admin_employee_selection_keyboard(action: str):
+    """Клавиатура для выбора сотрудника"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Выбрать сотрудника", callback_data=f"admin_select_employee_{action}")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_staff_menu")]
+    ])
+
+def admin_work_time_management_keyboard():
+    """Клавиатура для управления рабочим временем"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="▶️ Начать рабочий день", callback_data="admin_start_work_day")],
+        [InlineKeyboardButton(text="⏹️ Завершить рабочий день", callback_data="admin_end_work_day")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_staff_menu")]
     ]) 

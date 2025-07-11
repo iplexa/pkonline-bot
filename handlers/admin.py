@@ -4,9 +4,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from db.crud import (
     add_employee, remove_employee, add_group_to_employee, remove_group_from_employee, list_employees_with_groups, is_admin, get_employee_by_tg_id, get_applications_by_queue_type, clear_queue_by_type, import_applications_from_excel, get_all_work_days_report,
-    get_applications_statistics_by_queue, search_applications_by_fio, update_application_field, delete_application, get_all_employees, export_overdue_mail_applications_to_excel, create_database_backup
+    get_applications_statistics_by_queue, search_applications_by_fio, update_application_field, delete_application, get_all_employees, export_overdue_mail_applications_to_excel, create_database_backup,
+    update_employee_fio, get_employee_by_id, admin_start_work_day, admin_end_work_day
 )
-from keyboards.admin import admin_main_menu_keyboard, admin_staff_menu_keyboard, admin_queue_menu_keyboard, admin_queue_type_keyboard, admin_queue_pagination_keyboard, group_choice_keyboard, admin_reports_menu_keyboard, admin_search_applications_keyboard, admin_application_edit_keyboard, admin_queue_choice_keyboard, admin_status_choice_keyboard, admin_problem_status_choice_keyboard, admin_cancel_keyboard, admin_chat_settings_keyboard, admin_thread_settings_keyboard
+from keyboards.admin import admin_main_menu_keyboard, admin_staff_menu_keyboard, admin_queue_menu_keyboard, admin_queue_type_keyboard, admin_queue_pagination_keyboard, group_choice_keyboard, admin_reports_menu_keyboard, admin_search_applications_keyboard, admin_application_edit_keyboard, admin_queue_choice_keyboard, admin_status_choice_keyboard, admin_problem_status_choice_keyboard, admin_cancel_keyboard, admin_chat_settings_keyboard, admin_thread_settings_keyboard, admin_employee_selection_keyboard, admin_work_time_management_keyboard
 from keyboards.main import main_menu_keyboard
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
@@ -27,6 +28,8 @@ class AdminStates(StatesGroup):
     waiting_tg_id_group = State()
     waiting_group_add = State()
     waiting_group_remove = State()
+    waiting_employee_fio_edit = State()
+    waiting_work_time_action = State()
 
 class AdminQueueStates(StatesGroup):
     waiting_action = State()
@@ -1422,4 +1425,380 @@ async def process_thread_id(message: Message, state: FSMContext):
         await message.answer(
             "❌ Неверный формат. Пожалуйста, перешлите сообщение из треда или введите корректный ID треда.",
             reply_markup=cancel_keyboard
+        )
+
+# ===== НОВЫЕ ФУНКЦИИ =====
+
+@router.callback_query(F.data == "admin_edit_employee_fio")
+async def admin_edit_employee_fio(callback: CallbackQuery, state: FSMContext):
+    """Изменение ФИО сотрудника"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    await callback.message.edit_text(
+        "✏️ Изменение ФИО сотрудника\n\n"
+        "Выберите сотрудника для изменения ФИО:",
+        reply_markup=admin_employee_selection_keyboard("edit_fio")
+    )
+
+@router.callback_query(F.data == "admin_remove_employee")
+async def admin_remove_employee_button(callback: CallbackQuery, state: FSMContext):
+    """Удаление сотрудника через кнопки"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    await callback.message.edit_text(
+        "➖ Удаление сотрудника\n\n"
+        "Выберите сотрудника для удаления:",
+        reply_markup=admin_employee_selection_keyboard("remove")
+    )
+
+@router.callback_query(F.data == "admin_remove_group")
+async def admin_remove_group_button(callback: CallbackQuery, state: FSMContext):
+    """Удаление группы у сотрудника через кнопки"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    await callback.message.edit_text(
+        "➖ Удаление группы у сотрудника\n\n"
+        "Выберите сотрудника:",
+        reply_markup=admin_employee_selection_keyboard("remove_group")
+    )
+
+@router.callback_query(F.data == "admin_work_time_management")
+async def admin_work_time_management(callback: CallbackQuery, state: FSMContext):
+    """Управление рабочим временем сотрудников"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    await callback.message.edit_text(
+        "⏰ Управление рабочим временем\n\n"
+        "Выберите действие:",
+        reply_markup=admin_work_time_management_keyboard()
+    )
+
+@router.callback_query(F.data.startswith("admin_select_employee_"))
+async def admin_select_employee(callback: CallbackQuery, state: FSMContext):
+    """Выбор сотрудника для различных операций"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    action = callback.data.replace("admin_select_employee_", "")
+    employees = await get_all_employees()
+    
+    if not employees:
+        await callback.message.edit_text(
+            "❌ Нет сотрудников для выбора.",
+            reply_markup=admin_staff_menu_keyboard()
+        )
+        return
+    
+    builder = InlineKeyboardBuilder()
+    for emp in employees:
+        btn_text = f"{emp.fio} ({emp.tg_id})"
+        builder.button(text=btn_text, callback_data=f"admin_employee_{action}_{emp.id}")
+    
+    builder.button(text="🔙 Назад", callback_data="admin_staff_menu")
+    builder.adjust(1)
+    
+    action_names = {
+        "edit_fio": "изменения ФИО",
+        "remove": "удаления",
+        "remove_group": "удаления группы",
+        "start_work_day": "начала рабочего дня",
+        "end_work_day": "завершения рабочего дня"
+    }
+    
+    await callback.message.edit_text(
+        f"👥 Выберите сотрудника для {action_names.get(action, action)}:",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("admin_employee_edit_fio_"))
+async def admin_employee_edit_fio_select(callback: CallbackQuery, state: FSMContext):
+    """Выбор сотрудника для изменения ФИО"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    employee_id = int(callback.data.replace("admin_employee_edit_fio_", ""))
+    emp = await get_employee_by_id(employee_id)
+    
+    if not emp:
+        await callback.message.edit_text(
+            "❌ Сотрудник не найден.",
+            reply_markup=admin_staff_menu_keyboard()
+        )
+        return
+    
+    await state.update_data(employee_id=employee_id, current_fio=emp.fio)
+    await state.set_state(AdminStates.waiting_employee_fio_edit)
+    
+    await callback.message.edit_text(
+        f"✏️ Изменение ФИО сотрудника\n\n"
+        f"Текущее ФИО: {emp.fio}\n"
+        f"Telegram ID: {emp.tg_id}\n\n"
+        f"Введите новое ФИО:",
+        reply_markup=cancel_keyboard
+    )
+
+@router.message(AdminStates.waiting_employee_fio_edit)
+async def admin_employee_edit_fio_process(message: Message, state: FSMContext):
+    """Обработка изменения ФИО сотрудника"""
+    if not await check_admin(message.from_user.id):
+        return
+    
+    if message.text.strip().lower() == "отмена":
+        await state.clear()
+        await message.answer("Изменение отменено.", reply_markup=admin_staff_menu_keyboard())
+        return
+    
+    data = await state.get_data()
+    employee_id = data.get("employee_id")
+    current_fio = data.get("current_fio")
+    new_fio = message.text.strip()
+    
+    if not new_fio:
+        await message.answer("Пожалуйста, введите ФИО.", reply_markup=cancel_keyboard)
+        return
+    
+    emp = await get_employee_by_id(employee_id)
+    if not emp:
+        await message.answer("Сотрудник не найден.", reply_markup=admin_staff_menu_keyboard())
+        await state.clear()
+        return
+    
+    success = await update_employee_fio(emp.tg_id, new_fio)
+    if success:
+        await message.answer(
+            f"✅ ФИО изменено:\n"
+            f"Было: {current_fio}\n"
+            f"Стало: {new_fio}",
+            reply_markup=admin_staff_menu_keyboard()
+        )
+    else:
+        await message.answer(
+            "❌ Ошибка при изменении ФИО.",
+            reply_markup=admin_staff_menu_keyboard()
+        )
+    
+    await state.clear()
+
+@router.callback_query(F.data.startswith("admin_employee_remove_"))
+async def admin_employee_remove_select(callback: CallbackQuery, state: FSMContext):
+    """Выбор сотрудника для удаления"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    employee_id = int(callback.data.replace("admin_employee_remove_", ""))
+    emp = await get_employee_by_id(employee_id)
+    
+    if not emp:
+        await callback.message.edit_text(
+            "❌ Сотрудник не найден.",
+            reply_markup=admin_staff_menu_keyboard()
+        )
+        return
+    
+    # Создаем клавиатуру подтверждения
+    confirm_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"admin_confirm_remove_{employee_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_staff_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        f"⚠️ Подтверждение удаления\n\n"
+        f"Сотрудник: {emp.fio}\n"
+        f"Telegram ID: {emp.tg_id}\n"
+        f"Админ: {'Да' if emp.is_admin else 'Нет'}\n\n"
+        f"Вы уверены, что хотите удалить этого сотрудника?",
+        reply_markup=confirm_keyboard
+    )
+
+@router.callback_query(F.data.startswith("admin_confirm_remove_"))
+async def admin_confirm_remove_employee(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение удаления сотрудника"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    employee_id = int(callback.data.replace("admin_confirm_remove_", ""))
+    emp = await get_employee_by_id(employee_id)
+    
+    if not emp:
+        await callback.message.edit_text(
+            "❌ Сотрудник не найден.",
+            reply_markup=admin_staff_menu_keyboard()
+        )
+        return
+    
+    try:
+        await remove_employee(emp.tg_id)
+        await callback.message.edit_text(
+            f"✅ Сотрудник {emp.fio} ({emp.tg_id}) удален.",
+            reply_markup=admin_staff_menu_keyboard()
+        )
+    except Exception as e:
+        await callback.message.edit_text(
+            f"❌ Ошибка при удалении: {e}",
+            reply_markup=admin_staff_menu_keyboard()
+        )
+
+@router.callback_query(F.data.startswith("admin_employee_remove_group_"))
+async def admin_employee_remove_group_select(callback: CallbackQuery, state: FSMContext):
+    """Выбор сотрудника для удаления группы"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    employee_id = int(callback.data.replace("admin_employee_remove_group_", ""))
+    emp = await get_employee_by_id(employee_id)
+    
+    if not emp:
+        await callback.message.edit_text(
+            "❌ Сотрудник не найден.",
+            reply_markup=admin_staff_menu_keyboard()
+        )
+        return
+    
+    # Получаем группы сотрудника
+    emp_with_groups = await get_employee_by_tg_id(emp.tg_id)
+    if not emp_with_groups or not emp_with_groups.groups:
+        await callback.message.edit_text(
+            f"❌ У сотрудника {emp.fio} нет групп для удаления.",
+            reply_markup=admin_staff_menu_keyboard()
+        )
+        return
+    
+    # Создаем клавиатуру с группами
+    builder = InlineKeyboardBuilder()
+    for group in emp_with_groups.groups:
+        builder.button(text=f"➖ {group.name}", callback_data=f"admin_remove_group_{emp.tg_id}_{group.name}")
+    
+    builder.button(text="🔙 Назад", callback_data="admin_staff_menu")
+    builder.adjust(1)
+    
+    await callback.message.edit_text(
+        f"➖ Удаление группы у сотрудника\n\n"
+        f"Сотрудник: {emp.fio}\n"
+        f"Текущие группы: {', '.join([g.name for g in emp_with_groups.groups])}\n\n"
+        f"Выберите группу для удаления:",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("admin_remove_group_"))
+async def admin_remove_group_from_employee(callback: CallbackQuery, state: FSMContext):
+    """Удаление группы у сотрудника"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    parts = callback.data.replace("admin_remove_group_", "").split("_")
+    if len(parts) >= 2:
+        tg_id = parts[0]
+        group_name = "_".join(parts[1:])  # Восстанавливаем оригинальное имя группы
+        
+        emp = await get_employee_by_tg_id(tg_id)
+        if not emp:
+            await callback.message.edit_text(
+                "❌ Сотрудник не найден.",
+                reply_markup=admin_staff_menu_keyboard()
+            )
+            return
+        
+        try:
+            await remove_group_from_employee(tg_id, group_name)
+            await callback.message.edit_text(
+                f"✅ Группа '{group_name}' удалена у сотрудника {emp.fio}.",
+                reply_markup=admin_staff_menu_keyboard()
+            )
+        except Exception as e:
+            await callback.message.edit_text(
+                f"❌ Ошибка при удалении группы: {e}",
+                reply_markup=admin_staff_menu_keyboard()
+            )
+
+@router.callback_query(F.data == "admin_start_work_day")
+async def admin_start_work_day_select(callback: CallbackQuery, state: FSMContext):
+    """Выбор сотрудника для начала рабочего дня"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    await callback.message.edit_text(
+        "▶️ Начало рабочего дня\n\n"
+        "Выберите сотрудника:",
+        reply_markup=admin_employee_selection_keyboard("start_work_day")
+    )
+
+@router.callback_query(F.data == "admin_end_work_day")
+async def admin_end_work_day_select(callback: CallbackQuery, state: FSMContext):
+    """Выбор сотрудника для завершения рабочего дня"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    await callback.message.edit_text(
+        "⏹️ Завершение рабочего дня\n\n"
+        "Выберите сотрудника:",
+        reply_markup=admin_employee_selection_keyboard("end_work_day")
+    )
+
+@router.callback_query(F.data.startswith("admin_employee_start_work_day_"))
+async def admin_employee_start_work_day(callback: CallbackQuery, state: FSMContext):
+    """Начало рабочего дня для сотрудника"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    employee_id = int(callback.data.replace("admin_employee_start_work_day_", ""))
+    emp = await get_employee_by_id(employee_id)
+    
+    if not emp:
+        await callback.message.edit_text(
+            "❌ Сотрудник не найден.",
+            reply_markup=admin_work_time_management_keyboard()
+        )
+        return
+    
+    work_day, message = await admin_start_work_day(employee_id)
+    
+    if work_day:
+        await callback.message.edit_text(
+            f"✅ {message}\n\n"
+            f"Сотрудник: {emp.fio}\n"
+            f"Время начала: {work_day.start_time.strftime('%d.%m.%Y %H:%M')}",
+            reply_markup=admin_work_time_management_keyboard()
+        )
+    else:
+        await callback.message.edit_text(
+            f"❌ {message}",
+            reply_markup=admin_work_time_management_keyboard()
+        )
+
+@router.callback_query(F.data.startswith("admin_employee_end_work_day_"))
+async def admin_employee_end_work_day(callback: CallbackQuery, state: FSMContext):
+    """Завершение рабочего дня для сотрудника"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    employee_id = int(callback.data.replace("admin_employee_end_work_day_", ""))
+    emp = await get_employee_by_id(employee_id)
+    
+    if not emp:
+        await callback.message.edit_text(
+            "❌ Сотрудник не найден.",
+            reply_markup=admin_work_time_management_keyboard()
+        )
+        return
+    
+    work_day, message = await admin_end_work_day(employee_id)
+    
+    if work_day:
+        total_hours = work_day.total_work_time or 0
+        await callback.message.edit_text(
+            f"✅ {message}\n\n"
+            f"Сотрудник: {emp.fio}\n"
+            f"Время начала: {work_day.start_time.strftime('%d.%m.%Y %H:%M')}\n"
+            f"Время окончания: {work_day.end_time.strftime('%d.%m.%Y %H:%M')}\n"
+            f"Общее время: {total_hours:.2f} часов",
+            reply_markup=admin_work_time_management_keyboard()
+        )
+    else:
+        await callback.message.edit_text(
+            f"❌ {message}",
+            reply_markup=admin_work_time_management_keyboard()
         ) 

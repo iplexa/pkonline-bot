@@ -927,6 +927,80 @@ async def get_all_employees():
         result = await session.execute(stmt)
         return result.scalars().all()
 
+async def update_employee_fio(tg_id: str, new_fio: str):
+    """Обновить ФИО сотрудника"""
+    async for session in get_session():
+        stmt = select(Employee).where(Employee.tg_id == tg_id)
+        result = await session.execute(stmt)
+        emp = result.scalars().first()
+        if emp:
+            emp.fio = new_fio
+            await session.commit()
+            return True
+        return False
+
+async def get_employee_by_id(employee_id: int):
+    """Получить сотрудника по ID"""
+    async for session in get_session():
+        stmt = select(Employee).where(Employee.id == employee_id)
+        result = await session.execute(stmt)
+        return result.scalars().first()
+
+async def admin_start_work_day(employee_id: int):
+    """Админское начало рабочего дня для сотрудника"""
+    async for session in get_session():
+        # Проверяем, есть ли уже активный рабочий день
+        current_date = get_moscow_date()
+        stmt = select(WorkDay).where(
+            WorkDay.employee_id == employee_id,
+            WorkDay.date == current_date,
+            WorkDay.status == "active"
+        )
+        result = await session.execute(stmt)
+        existing_work_day = result.scalars().first()
+        
+        if existing_work_day:
+            return None, "У сотрудника уже есть активный рабочий день"
+        
+        # Создаем новый рабочий день
+        work_day = WorkDay(
+            employee_id=employee_id,
+            date=current_date,
+            start_time=get_moscow_now(),
+            status="active"
+        )
+        session.add(work_day)
+        await session.commit()
+        return work_day, "Рабочий день успешно начат"
+
+async def admin_end_work_day(employee_id: int):
+    """Админское завершение рабочего дня для сотрудника"""
+    async for session in get_session():
+        # Находим активный рабочий день
+        current_date = get_moscow_date()
+        stmt = select(WorkDay).where(
+            WorkDay.employee_id == employee_id,
+            WorkDay.date == current_date,
+            WorkDay.status == "active"
+        )
+        result = await session.execute(stmt)
+        work_day = result.scalars().first()
+        
+        if not work_day:
+            return None, "Активный рабочий день не найден"
+        
+        # Завершаем рабочий день
+        work_day.end_time = get_moscow_now()
+        work_day.status = "completed"
+        
+        # Вычисляем общее время работы
+        if work_day.start_time and work_day.end_time:
+            work_time = work_day.end_time - work_day.start_time
+            work_day.total_work_time = work_time.total_seconds() / 3600  # в часах
+        
+        await session.commit()
+        return work_day, "Рабочий день успешно завершен"
+
 async def escalate_application(app_id: int):
     """Выставить приоритет заявлению по app_id"""
     async for session in get_session():
@@ -1028,7 +1102,7 @@ async def create_database_backup():
         with tempfile.NamedTemporaryFile(delete=False, suffix='.sql') as tmp:
             backup_file = tmp.name
         
-        # Формируем команду pg_dump
+        # Формируем команду pg_dump с флагами для совместимости версий
         cmd = [
             'pg_dump',
             f'--host={host}',
@@ -1040,6 +1114,8 @@ async def create_database_backup():
             '--clean',
             '--no-owner',
             '--no-privileges',
+            '--no-sync',  # Избегаем проблем с версиями
+            '--no-comments',  # Убираем комментарии для совместимости
             f'--file={backup_file}'
         ]
         
@@ -1057,7 +1133,11 @@ async def create_database_backup():
         )
         
         if result.returncode != 0:
-            raise Exception(f"Ошибка pg_dump: {result.stderr}")
+            error_msg = result.stderr
+            if "server version mismatch" in error_msg:
+                raise Exception(f"Ошибка pg_dump: Несовместимость версий PostgreSQL. Сервер: 16.9, клиент: 15.13. Попробуйте обновить Docker образ или использовать флаг --no-sync.")
+            else:
+                raise Exception(f"Ошибка pg_dump: {error_msg}")
         
         # Проверяем, что файл создан и не пустой
         if not os.path.exists(backup_file) or os.path.getsize(backup_file) == 0:

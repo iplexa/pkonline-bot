@@ -298,6 +298,14 @@ async def mail_confirm_yes_callback(callback: CallbackQuery, state: FSMContext):
             f"✅ Заявление {app_id} ({fio}) подтверждено.\nДокументы подписаны и загружены.",
             reply_markup=mail_menu_keyboard()
         )
+        
+        # Логируем событие
+        telegram_logger = get_logger()
+        if telegram_logger:
+            app = await get_application_by_id(app_id)
+            if app:
+                await telegram_logger.log_mail_confirmed(emp.fio, app.fio)
+        
         await callback.bot.send_message(
             ADMIN_CHAT_ID,
             f"📮 Почта: {callback.from_user.full_name} подтвердил подпись заявления {app_id} ({fio})"

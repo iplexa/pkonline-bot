@@ -21,14 +21,18 @@ def problem_list_keyboard(problems):
 
 def problem_action_keyboard(app_id):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Решено (принять)", callback_data=f"problem_action_solved")],
-        [InlineKeyboardButton(text="↩️ Решено, отправить на доработку", callback_data=f"problem_action_solved_return")],
-        [InlineKeyboardButton(text="🛠️ Запустить процесс решения", callback_data=f"problem_action_in_progress")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"problem_action_cancel")],
+        [InlineKeyboardButton(text="✅ Решено (принять)", callback_data="problem_action_solved")],
+        [InlineKeyboardButton(text="↩️ Решено, отправить на доработку", callback_data="problem_action_solved_return")],
+        [InlineKeyboardButton(text="🛠️ Запустить процесс решения", callback_data="problem_action_in_progress")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="problem_action_cancel")],
         [InlineKeyboardButton(text="Назад", callback_data="problem_menu")]
     ])
 
-def problem_status_keyboard():
+def problem_status_keyboard(app_id):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Отмена", callback_data="problem_menu")]
+        [InlineKeyboardButton(text="✅ Решено", callback_data=f"problem_status_solved")],
+        [InlineKeyboardButton(text="↩️ Решено и в очередь", callback_data=f"problem_status_solved_return")],
+        [InlineKeyboardButton(text="🛠️ В процессе", callback_data=f"problem_status_in_progress")],
+        [InlineKeyboardButton(text="🔄 Новое", callback_data=f"problem_status_new")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="problem_menu")]
     ]) 

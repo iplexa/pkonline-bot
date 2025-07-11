@@ -5,6 +5,7 @@ from db.crud import get_employee_by_tg_id, start_work_day, end_work_day, start_b
 from keyboards.main import main_menu_keyboard
 from keyboards.work_time import work_time_keyboard, work_status_keyboard
 from datetime import datetime
+from utils.logger import get_logger
 
 router = Router()
 
@@ -98,12 +99,94 @@ async def start_work_day_handler(callback: CallbackQuery):
     
     work_day = await start_work_day(emp.id)
     if work_day:
+        # Логируем событие
+        telegram_logger = get_logger()
+        if telegram_logger:
+            await telegram_logger.log_work_time_start(emp.fio, work_day.start_time.strftime('%H:%M'))
+        
         await callback.message.edit_text(
             f"✅ Рабочий день начат в {work_day.start_time.strftime('%H:%M')}",
             reply_markup=work_status_keyboard(work_day.status.value)
         )
     else:
         await callback.answer("Рабочий день уже начат!", show_alert=True)
+
+@router.callback_query(F.data == "confirm_end_work_day")
+async def confirm_end_work_day_handler(callback: CallbackQuery):
+    emp = await get_employee_by_tg_id(str(callback.from_user.id))
+    if not emp:
+        return
+    
+    # Проверяем, есть ли активный рабочий день
+    current_work_day = await get_current_work_day(emp.id)
+    if not current_work_day or current_work_day.end_time:
+        await callback.answer("Нет активного рабочего дня!")
+        return
+    
+    # Показываем подтверждение
+    from keyboards.work_time import confirm_end_work_day_keyboard
+    await callback.message.edit_text(
+        "⚠️ Вы точно хотите завершить рабочий день?\n\n"
+        "После завершения нельзя будет начать новый рабочий день в этот же день.",
+        reply_markup=confirm_end_work_day_keyboard()
+    )
+
+@router.callback_query(F.data == "cancel_end_work_day")
+async def cancel_end_work_day_handler(callback: CallbackQuery):
+    emp = await get_employee_by_tg_id(str(callback.from_user.id))
+    if not emp:
+        return
+    
+    # Возвращаемся к статусу рабочего дня
+    current_work_day = await get_current_work_day(emp.id)
+    if current_work_day:
+        # Проверяем, есть ли активный перерыв
+        active_break = await get_active_break(current_work_day.id)
+        
+        # Определяем статус для отображения
+        display_status = current_work_day.status.value
+        if active_break and current_work_day.status.value == "active":
+            display_status = "paused"
+        
+        # Показываем статус текущего рабочего дня
+        status_text = "🟢 Рабочий день активен"
+        if display_status == "paused":
+            status_text = "🟡 Рабочий день приостановлен (перерыв)"
+        elif display_status == "finished":
+            status_text = "🔴 Рабочий день завершен"
+        
+        # Рассчитываем текущее время работы и перерыва
+        current_time = get_moscow_now()
+        total_work_seconds = current_work_day.total_work_time
+        total_break_seconds = current_work_day.total_break_time
+
+        # Если есть активный перерыв, добавляем его длительность к total_break_seconds
+        if active_break and active_break.start_time and not active_break.end_time:
+            total_break_seconds += int((current_time - active_break.start_time).total_seconds())
+
+        # Если рабочий день активен и не завершен, добавляем текущее время
+        if current_work_day.status.value == "active" and not current_work_day.end_time:
+            if current_work_day.start_time:
+                elapsed_seconds = int((current_time - current_work_day.start_time).total_seconds())
+                total_work_seconds = elapsed_seconds - total_break_seconds
+        
+        work_time_str = f"{total_work_seconds // 3600:02d}:{(total_work_seconds % 3600) // 60:02d}"
+        break_time_str = f"{total_break_seconds // 3600:02d}:{(total_break_seconds % 3600) // 60:02d}"
+        
+        message_text = f"{status_text}\n\n"
+        message_text += f"Начало: {current_work_day.start_time.strftime('%H:%M')}\n"
+        if current_work_day.end_time:
+            message_text += f"Окончание: {current_work_day.end_time.strftime('%H:%M')}\n"
+        message_text += f"Время работы: {work_time_str}\n"
+        message_text += f"Время перерывов: {break_time_str}\n"
+        message_text += f"Обработано заявлений: {current_work_day.applications_processed}"
+        
+        await callback.message.edit_text(message_text, reply_markup=work_status_keyboard(display_status))
+    else:
+        await callback.message.edit_text(
+            "Рабочий день не начат. Нажмите кнопку, чтобы начать рабочий день.",
+            reply_markup=work_time_keyboard()
+        )
 
 @router.callback_query(F.data == "end_work_day")
 async def end_work_day_handler(callback: CallbackQuery):
@@ -122,6 +205,11 @@ async def end_work_day_handler(callback: CallbackQuery):
         message_text += f"Время работы: {work_time_str}\n"
         message_text += f"Время перерывов: {break_time_str}\n"
         message_text += f"Обработано заявлений: {work_day.applications_processed}"
+        
+        # Логируем событие
+        telegram_logger = get_logger()
+        if telegram_logger:
+            await telegram_logger.log_work_time_end(emp.fio, work_day.end_time.strftime('%H:%M'), work_time_str)
         
         await callback.message.edit_text(message_text, reply_markup=work_time_keyboard())
     else:
@@ -160,6 +248,12 @@ async def start_break_handler(callback: CallbackQuery):
         message_text += f"Время работы: {work_time_str}\n"
         message_text += f"Время перерывов: {break_time_str}\n"
         message_text += f"Обработано заявлений: {current_work_day.applications_processed}"
+        
+        # Логируем событие
+        telegram_logger = get_logger()
+        if telegram_logger:
+            await telegram_logger.log_break_start(emp.fio, work_break.start_time.strftime('%H:%M'))
+        
         await callback.message.edit_text(message_text, reply_markup=work_status_keyboard(display_status))
     else:
         await callback.answer("Не удалось начать перерыв!", show_alert=True)
@@ -198,6 +292,12 @@ async def end_break_handler(callback: CallbackQuery):
             message_text += f"Время работы: {work_time_str}\n"
             message_text += f"Время перерывов: {break_time_str}\n"
             message_text += f"Обработано заявлений: {current_work_day.applications_processed}"
+            
+            # Логируем событие
+            telegram_logger = get_logger()
+            if telegram_logger:
+                await telegram_logger.log_break_end(emp.fio, work_break.end_time.strftime('%H:%M'))
+            
             print(f"[end_break_handler] message_text: {message_text}")
             await callback.message.edit_text(message_text, reply_markup=work_status_keyboard(display_status))
         else:

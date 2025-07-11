@@ -6,6 +6,7 @@ def admin_main_menu_keyboard():
         [InlineKeyboardButton(text="📋 Управление очередями", callback_data="admin_queue_menu")],
         [InlineKeyboardButton(text="🔍 Поиск и редактирование заявлений", callback_data="admin_search_applications")],
         [InlineKeyboardButton(text="📊 Отчеты", callback_data="admin_reports_menu")],
+        [InlineKeyboardButton(text="⚙️ Настройка чатов", callback_data="admin_chat_settings")],
         [InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]
     ])
 
@@ -25,6 +26,7 @@ def admin_queue_menu_keyboard():
         [InlineKeyboardButton(text="👁️ Просмотр очереди", callback_data="admin_view_queue")],
         [InlineKeyboardButton(text="🗑️ Очистить очередь", callback_data="admin_clear_queue")],
         [InlineKeyboardButton(text="📤 Загрузить заявления", callback_data="admin_upload_queue")],
+        [InlineKeyboardButton(text="💾 Создать бэкап БД", callback_data="admin_create_backup")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_menu")]
     ])
 
@@ -33,6 +35,7 @@ def admin_reports_menu_keyboard():
         [InlineKeyboardButton(text="📊 Полный отчет", callback_data="admin_full_report")],
         [InlineKeyboardButton(text="⏰ Отчет по рабочему времени", callback_data="admin_work_time_report")],
         [InlineKeyboardButton(text="📋 Отчет по заявлениям", callback_data="admin_applications_report")],
+        [InlineKeyboardButton(text="📮 Экспорт просроченных заявлений почты", callback_data="admin_export_overdue_mail")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_menu")]
     ])
 
@@ -113,4 +116,30 @@ def admin_problem_status_choice_keyboard(app_id: int):
 def admin_cancel_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_search_applications")]
+    ])
+
+def admin_chat_settings_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Настроить общий чат", callback_data="admin_set_general_chat")],
+        [InlineKeyboardButton(text="📝 Настроить админский чат", callback_data="admin_set_admin_chat")],
+        [InlineKeyboardButton(text="🧵 Настроить треды", callback_data="admin_set_threads")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_menu")]
+    ])
+
+def admin_thread_settings_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏰ Рабочее время", callback_data="admin_set_thread_work_time")],
+        [InlineKeyboardButton(text="📋 ЛК - Обработка", callback_data="admin_set_thread_lk_processing")],
+        [InlineKeyboardButton(text="⚠️ ЛК - Проблема", callback_data="admin_set_thread_lk_problem")],
+        [InlineKeyboardButton(text="✅ ЕПГУ - Принято", callback_data="admin_set_thread_epgu_accepted")],
+        [InlineKeyboardButton(text="📮 ЕПГУ - Почта", callback_data="admin_set_thread_epgu_mail_queue")],
+        [InlineKeyboardButton(text="⚠️ ЕПГУ - Проблема", callback_data="admin_set_thread_epgu_problem")],
+        [InlineKeyboardButton(text="✅ Почта - Подтверждено", callback_data="admin_set_thread_mail_confirmed")],
+        [InlineKeyboardButton(text="❌ Почта - Отклонено", callback_data="admin_set_thread_mail_rejected")],
+        [InlineKeyboardButton(text="✅ Разбор проблем - Исправлено", callback_data="admin_set_thread_problem_solved")],
+        [InlineKeyboardButton(text="🔄 Разбор проблем - В очередь", callback_data="admin_set_thread_problem_solved_queue")],
+        [InlineKeyboardButton(text="🔄 Разбор проблем - В процессе", callback_data="admin_set_thread_problem_in_progress")],
+        [InlineKeyboardButton(text="📊 Очереди - Обновления", callback_data="admin_set_thread_queue_updated")],
+        [InlineKeyboardButton(text="🚨 Эскалация", callback_data="admin_set_thread_escalation")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_chat_settings")]
     ]) 

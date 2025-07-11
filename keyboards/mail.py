@@ -3,7 +3,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 def mail_menu_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для меню почты"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 Поиск по ФИО", callback_data="mail_search_fio")],
+        [InlineKeyboardButton(text="🔍 Поиск по ФИО", callback_data="mail_search")],
         [InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]
     ])
 

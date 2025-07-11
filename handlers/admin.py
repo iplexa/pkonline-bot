@@ -4,17 +4,19 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from db.crud import (
     add_employee, remove_employee, add_group_to_employee, remove_group_from_employee, list_employees_with_groups, is_admin, get_employee_by_tg_id, get_applications_by_queue_type, clear_queue_by_type, import_applications_from_excel, get_all_work_days_report,
-    get_applications_statistics_by_queue, search_applications_by_fio, update_application_field, delete_application, get_all_employees
+    get_applications_statistics_by_queue, search_applications_by_fio, update_application_field, delete_application, get_all_employees, export_overdue_mail_applications_to_excel, create_database_backup
 )
-from keyboards.admin import admin_main_menu_keyboard, admin_staff_menu_keyboard, admin_queue_menu_keyboard, admin_queue_type_keyboard, admin_queue_pagination_keyboard, group_choice_keyboard, admin_reports_menu_keyboard, admin_search_applications_keyboard, admin_application_edit_keyboard, admin_queue_choice_keyboard, admin_status_choice_keyboard, admin_problem_status_choice_keyboard, admin_cancel_keyboard
+from keyboards.admin import admin_main_menu_keyboard, admin_staff_menu_keyboard, admin_queue_menu_keyboard, admin_queue_type_keyboard, admin_queue_pagination_keyboard, group_choice_keyboard, admin_reports_menu_keyboard, admin_search_applications_keyboard, admin_application_edit_keyboard, admin_queue_choice_keyboard, admin_status_choice_keyboard, admin_problem_status_choice_keyboard, admin_cancel_keyboard, admin_chat_settings_keyboard, admin_thread_settings_keyboard
 from keyboards.main import main_menu_keyboard
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from db.crud import Application, ApplicationStatusEnum, get_application_by_id
 from datetime import date, datetime
+from utils.logger import get_logger
 import logging
 import os
 import tempfile
+import json
 
 router = Router()
 
@@ -39,6 +41,11 @@ class AdminApplicationStates(StatesGroup):
     waiting_reason_edit = State()
     waiting_responsible_edit = State()
     waiting_problem_comment_edit = State()
+
+class AdminChatStates(StatesGroup):
+    waiting_general_chat_id = State()
+    waiting_admin_chat_id = State()
+    waiting_thread_id = State()
 
 QUEUE_PAGE_SIZE = 20
 
@@ -65,6 +72,50 @@ async def admin_staff_menu(callback: CallbackQuery, state: FSMContext):
 async def admin_queue_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_text("Управление очередями:", reply_markup=admin_queue_menu_keyboard())
+
+@router.callback_query(F.data == "admin_create_backup")
+async def admin_create_backup(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    # Показываем сообщение о начале процесса
+    await callback.message.edit_text("💾 Создаю бэкап базы данных...\n\nЭто может занять несколько минут.")
+    
+    try:
+        # Создаем бэкап
+        backup_file, message = await create_database_backup()
+        
+        if backup_file:
+            # Отправляем файл
+            with open(backup_file, 'rb') as file:
+                await callback.message.answer_document(
+                    file,
+                    caption=f"💾 {message}\n\nБэкап создан: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+                    reply_markup=admin_queue_menu_keyboard()
+                )
+            
+            # Удаляем временный файл
+            import os
+            os.unlink(backup_file)
+            
+            # Обновляем исходное сообщение
+            await callback.message.edit_text(
+                f"✅ {message}\n\nФайл бэкапа отправлен выше.",
+                reply_markup=admin_queue_menu_keyboard()
+            )
+        else:
+            # Ошибка при создании бэкапа
+            await callback.message.edit_text(
+                f"❌ {message}",
+                reply_markup=admin_queue_menu_keyboard()
+            )
+            
+    except Exception as e:
+        logging.error(f"Ошибка при создании бэкапа: {e}")
+        await callback.message.edit_text(
+            f"❌ Ошибка при создании бэкапа: {str(e)}",
+            reply_markup=admin_queue_menu_keyboard()
+        )
 
 @router.callback_query(F.data == "admin_add_employee")
 async def admin_add_employee(callback: CallbackQuery, state: FSMContext):
@@ -344,6 +395,14 @@ async def admin_upload_queue_file(message: Message, state: FSMContext):
             added, skipped, total = result
         else:
             added = skipped = total = '?'
+        
+        # Логируем обновление очереди
+        telegram_logger = get_logger()
+        if telegram_logger and added and added != '?' and int(added) > 0:
+            emp = await get_employee_by_tg_id(str(message.from_user.id))
+            if emp:
+                await telegram_logger.log_queue_updated(queue_type, emp.fio, int(added))
+        
         await progress_msg.edit_text(
             f"Импорт завершён для очереди: {queue_type}.\n"
             f"Всего строк: {total}\n"
@@ -351,15 +410,10 @@ async def admin_upload_queue_file(message: Message, state: FSMContext):
             f"Пропущено: {skipped}",
             reply_markup=admin_queue_menu_keyboard()
         )
+        await state.clear()
     except Exception as e:
-        import traceback
-        await progress_msg.edit_text(f"Ошибка при обработке файла: {e}\n{traceback.format_exc()[:1000]}", reply_markup=admin_queue_menu_keyboard())
-    await state.clear()
-
-@router.callback_query(F.data == "admin_queue_menu")
-async def admin_queue_menu(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text("Управление очередями:", reply_markup=admin_queue_menu_keyboard())
+        await progress_msg.edit_text(f"Ошибка при импорте: {e}", reply_markup=admin_queue_menu_keyboard())
+        await state.clear()
 
 @router.callback_query(F.data == "admin_reports_menu")
 async def admin_reports_menu(callback: CallbackQuery, state: FSMContext):
@@ -560,6 +614,50 @@ async def admin_applications_report(callback: CallbackQuery, state: FSMContext):
         report_text += "   Сегодня заявления не обрабатывались"
     
     await callback.message.edit_text(report_text, reply_markup=admin_reports_menu_keyboard())
+
+@router.callback_query(F.data == "admin_export_overdue_mail")
+async def admin_export_overdue_mail(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    # Показываем сообщение о начале процесса
+    await callback.message.edit_text("📮 Подготавливаю экспорт просроченных заявлений почты...")
+    
+    try:
+        # Экспортируем заявления, ждущие ответа более 3 дней
+        filename, message = await export_overdue_mail_applications_to_excel(days_threshold=3)
+        
+        if filename:
+            # Отправляем файл
+            with open(filename, 'rb') as file:
+                await callback.message.answer_document(
+                    file,
+                    caption=f"📮 {message}\n\nФайл содержит заявления, которые ждут ответа от почты более 3 дней.",
+                    reply_markup=admin_reports_menu_keyboard()
+                )
+            
+            # Удаляем временный файл
+            import os
+            os.unlink(filename)
+            
+            # Обновляем исходное сообщение
+            await callback.message.edit_text(
+                f"✅ {message}\n\nФайл отправлен выше.",
+                reply_markup=admin_reports_menu_keyboard()
+            )
+        else:
+            # Нет заявлений для экспорта
+            await callback.message.edit_text(
+                f"ℹ️ {message}",
+                reply_markup=admin_reports_menu_keyboard()
+            )
+            
+    except Exception as e:
+        logging.error(f"Ошибка при экспорте просроченных заявлений почты: {e}")
+        await callback.message.edit_text(
+            f"❌ Ошибка при экспорте: {str(e)}",
+            reply_markup=admin_reports_menu_keyboard()
+        )
 
 @router.callback_query(F.data == "admin_add_test_employees")
 async def admin_add_test_employees(callback: CallbackQuery, state: FSMContext):
@@ -1087,4 +1185,241 @@ async def admin_confirm_delete_application(callback: CallbackQuery, state: FSMCo
         await callback.message.edit_text(
             "❌ Ошибка при удалении заявления.",
             reply_markup=admin_search_applications_keyboard()
+        )
+
+@router.callback_query(F.data == "admin_chat_settings")
+async def admin_chat_settings(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    await state.clear()
+    await callback.message.edit_text(
+        "⚙️ Настройка чатов для логирования:\n\n"
+        "• Общий чат - супергруппа с тредами для всех событий\n"
+        "• Админский чат - обычный чат для ошибок и технических логов\n"
+        "• Треды - отдельные ветки в общем чате для разных типов событий",
+        reply_markup=admin_chat_settings_keyboard()
+    )
+
+@router.callback_query(F.data == "admin_set_general_chat")
+async def admin_set_general_chat(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    await state.set_state(AdminChatStates.waiting_general_chat_id)
+    await callback.message.edit_text(
+        "📝 Настройка общего чата:\n\n"
+        "1. Добавьте бота в супергруппу\n"
+        "2. Сделайте бота администратором\n"
+        "3. Включите треды в настройках группы\n"
+        "4. Отправьте ID чата (можно переслать любое сообщение из группы)",
+        reply_markup=cancel_keyboard
+    )
+
+@router.callback_query(F.data == "admin_set_admin_chat")
+async def admin_set_admin_chat(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    await state.set_state(AdminChatStates.waiting_admin_chat_id)
+    await callback.message.edit_text(
+        "📝 Настройка админского чата:\n\n"
+        "1. Создайте обычный чат с ботом\n"
+        "2. Отправьте ID чата (можно переслать любое сообщение из чата)\n\n"
+        "Этот чат будет использоваться для ошибок и технических логов",
+        reply_markup=cancel_keyboard
+    )
+
+@router.callback_query(F.data == "admin_set_threads")
+async def admin_set_threads(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    await state.clear()
+    await callback.message.edit_text(
+        "🧵 Настройка тредов:\n\n"
+        "Выберите тред для настройки. Для каждого треда нужно:\n"
+        "1. Создать тред в общем чате\n"
+        "2. Получить ID треда\n"
+        "3. Указать его здесь",
+        reply_markup=admin_thread_settings_keyboard()
+    )
+
+@router.callback_query(F.data.startswith("admin_set_thread_"))
+async def admin_set_thread(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    thread_name = callback.data.replace("admin_set_thread_", "")
+    thread_names = {
+        "work_time": "Рабочее время",
+        "lk_processing": "ЛК - Обработка",
+        "lk_problem": "ЛК - Проблема",
+        "epgu_accepted": "ЕПГУ - Принято",
+        "epgu_mail_queue": "ЕПГУ - Отправлено в очередь почты",
+        "epgu_problem": "ЕПГУ - Проблема",
+        "mail_confirmed": "Почта - Подтверждено",
+        "mail_rejected": "Почта - Отклонено",
+        "problem_solved": "Разбор проблем - Исправлено",
+        "problem_solved_queue": "Разбор проблем - Исправлено отправлено в очередь",
+        "problem_in_progress": "Разбор проблем - Процесс решения запущен",
+        "queue_updated": "Очереди - Обновлен список заявлений",
+        "escalation": "Эскалация"
+    }
+    
+    thread_display_name = thread_names.get(thread_name, thread_name)
+    
+    await state.set_state(AdminChatStates.waiting_thread_id)
+    await state.update_data(thread_name=thread_name)
+    
+    await callback.message.edit_text(
+        f"🧵 Настройка треда: {thread_display_name}\n\n"
+        "1. Создайте тред в общем чате\n"
+        "2. Отправьте ID треда (можно переслать сообщение из треда)\n\n"
+        "ID треда - это число, которое можно получить через @userinfobot",
+        reply_markup=cancel_keyboard
+    )
+
+@router.message(AdminChatStates.waiting_general_chat_id)
+async def process_general_chat_id(message: Message, state: FSMContext):
+    if not await check_admin(message.from_user.id):
+        return
+    
+    try:
+        # Пытаемся извлечь chat_id из пересланного сообщения или из текста
+        if message.forward_from_chat:
+            chat_id = message.forward_from_chat.id
+        else:
+            chat_id = int(message.text.strip())
+        
+        # Проверяем, что это супергруппа
+        if message.forward_from_chat and message.forward_from_chat.type != "supergroup":
+            await message.answer("❌ Это не супергруппа. Пожалуйста, используйте супергруппу с включенными тредами.")
+            return
+        
+        # Сохраняем в переменную окружения или в файл конфигурации
+        # Для простоты сохраняем в файл
+        config_data = {}
+        config_file = "chat_config.json"
+        
+        if os.path.exists(config_file):
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+        
+        config_data['GENERAL_CHAT_ID'] = chat_id
+        
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=2)
+        
+        await message.answer(
+            f"✅ Общий чат настроен: {chat_id}\n\n"
+            "Теперь настройте треды в этом чате.",
+            reply_markup=admin_chat_settings_keyboard()
+        )
+        await state.clear()
+        
+    except (ValueError, AttributeError):
+        await message.answer(
+            "❌ Неверный формат. Пожалуйста, перешлите сообщение из супергруппы или введите корректный ID чата.",
+            reply_markup=cancel_keyboard
+        )
+
+@router.message(AdminChatStates.waiting_admin_chat_id)
+async def process_admin_chat_id(message: Message, state: FSMContext):
+    if not await check_admin(message.from_user.id):
+        return
+    
+    try:
+        # Пытаемся извлечь chat_id из пересланного сообщения или из текста
+        if message.forward_from_chat:
+            chat_id = message.forward_from_chat.id
+        else:
+            chat_id = int(message.text.strip())
+        
+        # Сохраняем в файл конфигурации
+        config_data = {}
+        config_file = "chat_config.json"
+        
+        if os.path.exists(config_file):
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+        
+        config_data['ADMIN_LOG_CHAT_ID'] = chat_id
+        
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=2)
+        
+        await message.answer(
+            f"✅ Админский чат настроен: {chat_id}\n\n"
+            "Теперь все ошибки и технические логи будут отправляться в этот чат.",
+            reply_markup=admin_chat_settings_keyboard()
+        )
+        await state.clear()
+        
+    except (ValueError, AttributeError):
+        await message.answer(
+            "❌ Неверный формат. Пожалуйста, перешлите сообщение из чата или введите корректный ID чата.",
+            reply_markup=cancel_keyboard
+        )
+
+@router.message(AdminChatStates.waiting_thread_id)
+async def process_thread_id(message: Message, state: FSMContext):
+    if not await check_admin(message.from_user.id):
+        return
+    
+    try:
+        data = await state.get_data()
+        thread_name = data.get('thread_name')
+        
+        # Пытаемся извлечь thread_id из пересланного сообщения или из текста
+        if message.forward_from_chat:
+            thread_id = message.message_thread_id or 0
+        else:
+            thread_id = int(message.text.strip())
+        
+        # Сохраняем в файл конфигурации
+        config_data = {}
+        config_file = "chat_config.json"
+        
+        if os.path.exists(config_file):
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+        
+        if 'THREAD_IDS' not in config_data:
+            config_data['THREAD_IDS'] = {}
+        
+        config_data['THREAD_IDS'][thread_name] = thread_id
+        
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=2)
+        
+        thread_names = {
+            "work_time": "Рабочее время",
+            "lk_processing": "ЛК - Обработка",
+            "lk_problem": "ЛК - Проблема",
+            "epgu_accepted": "ЕПГУ - Принято",
+            "epgu_mail_queue": "ЕПГУ - Отправлено в очередь почты",
+            "epgu_problem": "ЕПГУ - Проблема",
+            "mail_confirmed": "Почта - Подтверждено",
+            "mail_rejected": "Почта - Отклонено",
+            "problem_solved": "Разбор проблем - Исправлено",
+            "problem_solved_queue": "Разбор проблем - Исправлено отправлено в очередь",
+            "problem_in_progress": "Разбор проблем - Процесс решения запущен",
+            "queue_updated": "Очереди - Обновлен список заявлений",
+            "escalation": "Эскалация"
+        }
+        
+        thread_display_name = thread_names.get(thread_name, thread_name)
+        
+        await message.answer(
+            f"✅ Тред настроен: {thread_display_name} (ID: {thread_id})\n\n"
+            "Теперь события этого типа будут отправляться в этот тред.",
+            reply_markup=admin_thread_settings_keyboard()
+        )
+        await state.clear()
+        
+    except (ValueError, AttributeError):
+        await message.answer(
+            "❌ Неверный формат. Пожалуйста, перешлите сообщение из треда или введите корректный ID треда.",
+            reply_markup=cancel_keyboard
         ) 

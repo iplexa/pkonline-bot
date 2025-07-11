@@ -1,26 +1,13 @@
 version: '3.9'
 
 services:
-  db:
-    image: postgres:16
-    restart: always
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
   bot:
     build: .
-    command: ["bash", "start.sh"]
+    command: ["bash", "start_external_db.sh"]
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
-      # Настройки БД (локальная или внешняя)
-      USE_EXTERNAL_DB: ${USE_EXTERNAL_DB:-false}
-      DB_DSN: ${DB_DSN}
+      # Настройки внешней БД
+      USE_EXTERNAL_DB: true
       EXTERNAL_DB_HOST: ${EXTERNAL_DB_HOST}
       EXTERNAL_DB_PORT: ${EXTERNAL_DB_PORT:-5432}
       EXTERNAL_DB_NAME: ${EXTERNAL_DB_NAME}
@@ -45,11 +32,6 @@ services:
       THREAD_PROBLEM_IN_PROGRESS: ${THREAD_PROBLEM_IN_PROGRESS:-0}
       THREAD_QUEUE_UPDATED: ${THREAD_QUEUE_UPDATED:-0}
       THREAD_ESCALATION: ${THREAD_ESCALATION:-0}
-    depends_on:
-      - db
     restart: always
     volumes:
-      - .:/app
-
-volumes:
-  pgdata: 
+      - .:/app 

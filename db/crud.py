@@ -8,6 +8,10 @@ import tempfile
 from utils.excel import parse_lk_applications_from_excel, parse_epgu_applications_from_excel
 import pytz
 import logging
+import pandas as pd
+import subprocess
+import os
+from urllib.parse import urlparse
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -380,6 +384,10 @@ async def start_work_day(employee_id: int):
         existing_day = result.scalars().first()
         
         if existing_day:
+            # Если рабочий день уже завершен сегодня, запрещаем повторное начало
+            if existing_day.end_time:
+                return None  # Возвращаем None, чтобы показать ошибку
+            # Если рабочий день активен, возвращаем его
             return existing_day
         
         work_day = WorkDay(
@@ -842,11 +850,9 @@ async def get_problem_applications(queue_type: str):
         return result.scalars().all()
 
 async def get_application_by_id(app_id: int):
+    """Получить заявление по ID"""
     async for session in get_session():
-        stmt = select(Application).where(Application.id == app_id).options(
-            selectinload(Application.processed_by),
-            selectinload(Application.epgu_processor)
-        )
+        stmt = select(Application).where(Application.id == app_id)
         result = await session.execute(stmt)
         return result.scalars().first()
 
@@ -919,4 +925,150 @@ async def get_all_employees():
     async for session in get_session():
         stmt = select(Employee).order_by(Employee.fio)
         result = await session.execute(stmt)
-        return result.scalars().all() 
+        return result.scalars().all()
+
+async def escalate_application(app_id: int):
+    """Выставить приоритет заявлению по app_id"""
+    async for session in get_session():
+        stmt = select(Application).where(Application.id == app_id)
+        result = await session.execute(stmt)
+        app = result.scalars().first()
+        if app:
+            app.is_priority = True
+            await session.commit()
+            return True
+        return False
+
+async def get_overdue_mail_applications(days_threshold: int = 3):
+    """
+    Получить заявления в очереди почты, которые ждут ответа более указанного количества дней
+    """
+    async for session in get_session():
+        from datetime import timedelta
+        threshold_date = get_moscow_now() - timedelta(days=days_threshold)
+        
+        stmt = select(Application).where(
+            Application.queue_type == "epgu_mail",
+            Application.status == ApplicationStatusEnum.QUEUED,
+            Application.postponed_until < threshold_date
+        ).order_by(Application.postponed_until.asc())
+        
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+async def export_overdue_mail_applications_to_excel(days_threshold: int = 3):
+    """
+    Экспортировать заявления, ждущие ответа от почты более указанного количества дней, в Excel
+    """
+    applications = await get_overdue_mail_applications(days_threshold)
+    
+    if not applications:
+        return None, "Нет заявлений, ждущих ответа более {} дней".format(days_threshold)
+    
+    # Подготавливаем данные для Excel
+    data = []
+    for app in applications:
+        days_waiting = (get_moscow_now() - app.postponed_until).days
+        data.append({
+            'ID заявления': app.id,
+            'ФИО': app.fio,
+            'Дата подачи': app.submitted_at.strftime('%d.%m.%Y %H:%M'),
+            'Ожидается ответ с': app.postponed_until.strftime('%d.%m.%Y %H:%M'),
+            'Дней ожидания': days_waiting,
+            'Действие ЕПГУ': app.epgu_action.value if app.epgu_action else 'Не указано',
+            'Нужны сканы': 'Да' if app.needs_scans else 'Нет',
+            'Нужна подпись': 'Да' if app.needs_signature else 'Нет'
+        })
+    
+    # Создаем DataFrame
+    df = pd.DataFrame(data)
+    
+    # Создаем временный файл
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+        filename = tmp.name
+    
+    # Сохраняем в Excel
+    with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Просроченные заявления', index=False)
+        
+        # Получаем лист для форматирования
+        worksheet = writer.sheets['Просроченные заявления']
+        
+        # Автоматически подгоняем ширину столбцов
+        for column in worksheet.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            worksheet.column_dimensions[column_letter].width = adjusted_width
+
+async def create_database_backup():
+    """
+    Создает бэкап базы данных в формате SQL
+    """
+    try:
+        from config import DB_DSN
+        
+        # Парсим DSN для получения параметров подключения
+        parsed = urlparse(DB_DSN.replace('postgresql+asyncpg://', 'postgresql://'))
+        
+        # Извлекаем параметры
+        host = parsed.hostname
+        port = parsed.port or 5432
+        database = parsed.path.lstrip('/')
+        username = parsed.username
+        password = parsed.password
+        
+        # Создаем временный файл для бэкапа
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.sql') as tmp:
+            backup_file = tmp.name
+        
+        # Формируем команду pg_dump
+        cmd = [
+            'pg_dump',
+            f'--host={host}',
+            f'--port={port}',
+            f'--username={username}',
+            f'--dbname={database}',
+            '--no-password',  # Пароль будет запрошен через переменную окружения
+            '--verbose',
+            '--clean',
+            '--no-owner',
+            '--no-privileges',
+            f'--file={backup_file}'
+        ]
+        
+        # Устанавливаем переменную окружения для пароля
+        env = os.environ.copy()
+        env['PGPASSWORD'] = password
+        
+        # Выполняем команду
+        result = subprocess.run(
+            cmd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 минут таймаут
+        )
+        
+        if result.returncode != 0:
+            raise Exception(f"Ошибка pg_dump: {result.stderr}")
+        
+        # Проверяем, что файл создан и не пустой
+        if not os.path.exists(backup_file) or os.path.getsize(backup_file) == 0:
+            raise Exception("Файл бэкапа не создан или пустой")
+        
+        return backup_file, f"Бэкап создан успешно. Размер: {os.path.getsize(backup_file)} байт"
+        
+    except subprocess.TimeoutExpired:
+        raise Exception("Таймаут при создании бэкапа (более 5 минут)")
+    except Exception as e:
+        # Удаляем временный файл в случае ошибки
+        if 'backup_file' in locals() and os.path.exists(backup_file):
+            os.unlink(backup_file)
+        raise Exception(f"Ошибка при создании бэкапа: {str(e)}") 

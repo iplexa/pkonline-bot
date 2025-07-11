@@ -13,14 +13,21 @@ def work_status_keyboard(status: str):
     
     if status == "active":
         buttons.append([InlineKeyboardButton(text="☕ Начать перерыв", callback_data="start_break")])
-        buttons.append([InlineKeyboardButton(text="🔴 Завершить рабочий день", callback_data="end_work_day")])
+        buttons.append([InlineKeyboardButton(text="🔴 Завершить рабочий день", callback_data="confirm_end_work_day")])
     elif status == "paused":
         buttons.append([InlineKeyboardButton(text="✅ Завершить перерыв", callback_data="end_break")])
-        buttons.append([InlineKeyboardButton(text="🔴 Завершить рабочий день", callback_data="end_work_day")])
+        buttons.append([InlineKeyboardButton(text="🔴 Завершить рабочий день", callback_data="confirm_end_work_day")])
     elif status == "finished":
-        buttons.append([InlineKeyboardButton(text="🟢 Начать новый день", callback_data="start_work_day")])
         buttons.append([InlineKeyboardButton(text="📊 Мой отчет", callback_data="work_report")])
+        buttons.append([InlineKeyboardButton(text="🔄 Начать новый день", callback_data="start_work_day")])
     
     buttons.append([InlineKeyboardButton(text="Меню", callback_data="main_menu")])
     
-    return InlineKeyboardMarkup(inline_keyboard=buttons) 
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def confirm_end_work_day_keyboard():
+    """Клавиатура для подтверждения завершения рабочего дня"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, завершить", callback_data="end_work_day")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_end_work_day")],
+    ]) 

@@ -12,12 +12,16 @@ from db.crud import (
     has_access, 
     return_application_to_queue, 
     increment_processed_applications,
-    update_application_field
+    update_application_field,
+    get_application_by_id,
+    get_applications_by_fio_and_queue,
+    escalate_application
 )
 from db.models import ApplicationStatusEnum, EPGUActionEnum
-from keyboards.epgu import epgu_queue_keyboard, epgu_decision_keyboard, epgu_reason_keyboard
+from keyboards.epgu import epgu_queue_keyboard, epgu_decision_keyboard, epgu_reason_keyboard, epgu_escalate_keyboard
 from keyboards.main import main_menu_keyboard
 from config import ADMIN_CHAT_ID
+from utils.logger import get_logger
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,6 +31,7 @@ router = Router()
 class EPGUStates(StatesGroup):
     waiting_decision = State()
     waiting_reason = State()
+    waiting_search_fio = State()
 
 @router.callback_query(F.data == "epgu_menu")
 async def epgu_menu_entry(callback: CallbackQuery, state: FSMContext):
@@ -34,13 +39,13 @@ async def epgu_menu_entry(callback: CallbackQuery, state: FSMContext):
         emp = await get_employee_by_tg_id(str(callback.from_user.id))
         if not emp or not await has_access(str(callback.from_user.id), "epgu"):
             return
-        await callback.message.edit_text("Очередь ЕПГУ. Нажмите кнопку, чтобы получить заявление.", reply_markup=epgu_queue_keyboard(menu=True))
+        await callback.message.edit_text("Очередь ЕПГУ. Нажмите кнопку, чтобы получить заявление.", reply_markup=epgu_decision_keyboard(menu=True))
     except Exception as e:
         await callback.message.answer(f"Ошибка: {e}")
         import traceback
         print(traceback.format_exc())
 
-@router.callback_query(F.data == "get_epgu_application")
+@router.callback_query(F.data == "epgu_next")
 async def get_epgu_application(callback: CallbackQuery, state: FSMContext):
     emp = await get_employee_by_tg_id(str(callback.from_user.id))
     if not emp or not await has_access(str(callback.from_user.id), "epgu"):
@@ -54,7 +59,7 @@ async def get_epgu_application(callback: CallbackQuery, state: FSMContext):
     await state.set_state(EPGUStates.waiting_decision)
 
 @router.callback_query(EPGUStates.waiting_decision, F.data.in_([
-    "epgu_accept", "epgu_has_scans", "epgu_no_scans", "epgu_only_scans", "epgu_error", "return_epgu"
+    "accept_epgu", "epgu_signature", "epgu_signature_scans", "epgu_scans", "epgu_error", "return_epgu"
 ]))
 async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
     emp = await get_employee_by_tg_id(str(callback.from_user.id))
@@ -66,7 +71,7 @@ async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
 
     logger.info(f"Обработка решения ЕПГУ: {callback.data} для app_id={app_id}, employee_id={employee_id}")
 
-    if callback.data == "epgu_accept":
+    if callback.data == "accept_epgu":
         # Вариант 1: Принято сразу
         await update_application_status(app_id, ApplicationStatusEnum.ACCEPTED, employee_id=employee_id)
         # Сохраняем, что обработал сотрудник ЕПГУ
@@ -75,10 +80,18 @@ async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
         result = await increment_processed_applications(employee_id)
         logger.info(f"Заявление ЕПГУ принято: app_id={app_id}, increment_result={result}")
         await callback.message.edit_text("Заявление принято.", reply_markup=epgu_queue_keyboard(menu=True))
+        
+        # Логируем событие
+        telegram_logger = get_logger()
+        if telegram_logger:
+            app = await get_application_by_id(app_id)
+            if app:
+                await telegram_logger.log_epgu_accepted(emp.fio, app_id, app.fio)
+        
         await callback.bot.send_message(ADMIN_CHAT_ID, f"ЕПГУ: {callback.from_user.full_name} принял заявление {app_id}")
         await state.clear()
 
-    elif callback.data == "epgu_has_scans":
+    elif callback.data == "epgu_signature":
         # Вариант 2: Есть сканы, отправляем на подпись (в очередь почты)
         await update_application_queue_type(app_id, "epgu_mail", employee_id=employee_id)
         await update_application_field(app_id, "epgu_action", EPGUActionEnum.HAS_SCANS.value)
@@ -90,10 +103,18 @@ async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
         result = await increment_processed_applications(employee_id)
         logger.info(f"Заявление ЕПГУ отправлено на подпись (есть сканы): app_id={app_id}, increment_result={result}")
         await callback.message.edit_text("Заявление отправлено в очередь почты для подписи.", reply_markup=epgu_queue_keyboard(menu=True))
+        
+        # Логируем событие
+        telegram_logger = get_logger()
+        if telegram_logger:
+            app = await get_application_by_id(app_id)
+            if app:
+                await telegram_logger.log_epgu_mail_queue(emp.fio, app_id, app.fio, "Подпись (есть сканы)")
+        
         await callback.bot.send_message(ADMIN_CHAT_ID, f"ЕПГУ: {callback.from_user.full_name} отправил заявление {app_id} на подпись (есть сканы)")
         await state.clear()
 
-    elif callback.data == "epgu_no_scans":
+    elif callback.data == "epgu_signature_scans":
         # Вариант 3: Нет сканов, отправляем на подпись и запрашиваем сканы (в очередь почты)
         await update_application_queue_type(app_id, "epgu_mail", employee_id=employee_id)
         await update_application_field(app_id, "epgu_action", EPGUActionEnum.NO_SCANS.value)
@@ -105,10 +126,18 @@ async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
         result = await increment_processed_applications(employee_id)
         logger.info(f"Заявление ЕПГУ отправлено на подпись и запрос сканов: app_id={app_id}, increment_result={result}")
         await callback.message.edit_text("Заявление отправлено в очередь почты для подписи и запроса сканов.", reply_markup=epgu_queue_keyboard(menu=True))
+        
+        # Логируем событие
+        telegram_logger = get_logger()
+        if telegram_logger:
+            app = await get_application_by_id(app_id)
+            if app:
+                await telegram_logger.log_epgu_mail_queue(emp.fio, app_id, app.fio, "Подпись и запрос сканов")
+        
         await callback.bot.send_message(ADMIN_CHAT_ID, f"ЕПГУ: {callback.from_user.full_name} отправил заявление {app_id} на подпись и запрос сканов")
         await state.clear()
 
-    elif callback.data == "epgu_only_scans":
+    elif callback.data == "epgu_scans":
         # Новый вариант: нужны только сканы, подпись не требуется
         await update_application_queue_type(app_id, "epgu_mail", employee_id=employee_id)
         await update_application_field(app_id, "epgu_action", EPGUActionEnum.ONLY_SCANS.value)
@@ -120,6 +149,14 @@ async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
         result = await increment_processed_applications(employee_id)
         logger.info(f"Заявление ЕПГУ отправлено в очередь почты (только сканы): app_id={app_id}, increment_result={result}")
         await callback.message.edit_text("Заявление отправлено в очередь почты для получения сканов (подпись не требуется).", reply_markup=epgu_queue_keyboard(menu=True))
+        
+        # Логируем событие
+        telegram_logger = get_logger()
+        if telegram_logger:
+            app = await get_application_by_id(app_id)
+            if app:
+                await telegram_logger.log_epgu_mail_queue(emp.fio, app_id, app.fio, "Получение сканов")
+        
         await callback.bot.send_message(ADMIN_CHAT_ID, f"ЕПГУ: {callback.from_user.full_name} отправил заявление {app_id} на получение сканов (без подписи)")
         await state.clear()
 
@@ -172,9 +209,63 @@ async def process_epgu_reason(message: Message, state: FSMContext):
         logger.info(f"Заявление ЕПГУ помечено как проблемное: app_id={app_id}, increment_result={result}")
         
         await message.answer(f"Заявление помечено как проблемное. Причина: {reason}", reply_markup=epgu_queue_keyboard(menu=True))
+        
+        # Логируем событие
+        telegram_logger = get_logger()
+        if telegram_logger:
+            app = await get_application_by_id(app_id)
+            if app:
+                await telegram_logger.log_epgu_problem(emp.fio, app_id, app.fio, reason)
+        
         await message.bot.send_message(ADMIN_CHAT_ID, f"ЕПГУ: {message.from_user.full_name} пометил заявление {app_id} как проблемное. Причина: {reason}")
         await state.clear()
 
 @router.callback_query(EPGUStates.waiting_decision, F.data == "main_menu")
 async def block_menu_exit_during_processing(callback: CallbackQuery, state: FSMContext):
-    await callback.answer("Сначала обработайте текущее заявление!", show_alert=True) 
+    await callback.answer("Сначала обработайте текущее заявление!", show_alert=True)
+
+@router.callback_query(F.data == "epgu_search_fio")
+async def epgu_search_fio_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(EPGUStates.waiting_search_fio)
+    await callback.message.edit_text("Введите ФИО для поиска заявлений:", reply_markup=epgu_queue_keyboard(menu=True))
+
+@router.message(EPGUStates.waiting_search_fio)
+async def epgu_search_fio_process(message: Message, state: FSMContext):
+    emp = await get_employee_by_tg_id(str(message.from_user.id))
+    if not emp or not await has_access(str(message.from_user.id), "epgu"):
+        return
+    fio = message.text.strip()
+    if not fio:
+        await message.answer("Пожалуйста, введите ФИО.", reply_markup=epgu_queue_keyboard(menu=True))
+        return
+    apps = await get_applications_by_fio_and_queue(fio, "epgu")
+    if not apps:
+        await message.answer(f"Заявления для '{fio}' не найдены.", reply_markup=epgu_queue_keyboard(menu=True))
+        await state.clear()
+        return
+    for app in apps:
+        text = f"🏛️ Заявление ЕПГУ #{app.id}\n\n"
+        text += f"👨‍💼 ФИО: {app.fio}\n"
+        text += f"📅 Дата подачи: {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
+        if app.is_priority:
+            text += "🚨 ПРИОРИТЕТНОЕ\n"
+        await message.answer(text, reply_markup=epgu_escalate_keyboard(app.id, app.is_priority))
+    await state.clear()
+
+@router.callback_query(F.data.startswith("epgu_escalate_"))
+async def epgu_escalate_handler(callback: CallbackQuery):
+    emp = await get_employee_by_tg_id(str(callback.from_user.id))
+    if not emp or not await has_access(str(callback.from_user.id), "epgu"):
+        return
+    app_id = int(callback.data.replace("epgu_escalate_", ""))
+    success = await escalate_application(app_id)
+    if success:
+        from db.crud import get_application_by_id
+        app = await get_application_by_id(app_id)
+        # Логирование
+        logger = get_logger()
+        if logger and app:
+            await logger.log_escalation(app.id, app.queue_type, emp.fio, reason="Эскалация через поиск по ФИО")
+        await callback.message.edit_text(f"✅ Заявление {app_id} эскалировано (приоритетное)", reply_markup=epgu_queue_keyboard(menu=True))
+    else:
+        await callback.message.edit_text("❌ Не удалось эскалировать заявление.", reply_markup=epgu_queue_keyboard(menu=True)) 

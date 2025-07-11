@@ -10,6 +10,7 @@ from handlers.problem import router as problem_router
 from db.models import Base
 from db.session import engine
 from db.crud import add_employee, get_employee_by_tg_id
+from utils.logger import init_logger
 
 async def create_tables():
     async with engine.begin() as conn:
@@ -23,6 +24,9 @@ async def ensure_admin():
 async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
+    
+    # Инициализируем логгер
+    init_logger(bot)
     
     # Регистрируем роутеры
     dp.include_router(common_router)

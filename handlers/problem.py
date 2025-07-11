@@ -13,6 +13,7 @@ from db.crud import (
 from keyboards.problem import problem_menu_keyboard, problem_list_keyboard, problem_action_keyboard, problem_status_keyboard
 from keyboards.main import main_menu_keyboard
 from config import ADMIN_CHAT_ID
+from utils.logger import get_logger
 import logging
 
 logger = logging.getLogger(__name__)
@@ -83,16 +84,40 @@ async def problem_action(callback: CallbackQuery, state: FSMContext):
     action = callback.data.replace("problem_action_", "")
     if action == "solved":
         await update_problem_status(app_id, "solved")
+        
+        # Логируем событие
+        telegram_logger = get_logger()
+        if telegram_logger:
+            app = await get_application_by_id(app_id)
+            if app:
+                await telegram_logger.log_problem_solved(emp.fio, app_id, app.fio)
+        
         await callback.message.edit_text("✅ Дело отмечено как решенное и отправлено как принятое.", reply_markup=problem_menu_keyboard())
         await state.clear()
         await problem_menu_entry(callback, state)
     elif action == "solved_return":
         await update_problem_status(app_id, "solved_return")
+        
+        # Логируем событие
+        telegram_logger = get_logger()
+        if telegram_logger:
+            app = await get_application_by_id(app_id)
+            if app:
+                await telegram_logger.log_problem_solved_queue(emp.fio, app_id, app.fio, app.queue_type)
+        
         await callback.message.edit_text("✅ Дело отмечено как решенное и возвращено в очередь.", reply_markup=problem_menu_keyboard())
         await state.clear()
         await problem_menu_entry(callback, state)
     elif action == "in_progress":
         await state.set_state(ProblemStates.waiting_comment)
+        
+        # Логируем событие
+        telegram_logger = get_logger()
+        if telegram_logger:
+            app = await get_application_by_id(app_id)
+            if app:
+                await telegram_logger.log_problem_in_progress(emp.fio, app_id, app.fio)
+        
         await callback.message.edit_text("Введите комментарий по процессу решения:", reply_markup=problem_status_keyboard())
     elif action == "cancel":
         await callback.message.edit_text("Дело осталось в проблемных.", reply_markup=problem_menu_keyboard())

@@ -102,11 +102,35 @@ async def get_next_application(queue_type: str, employee_id: int = None, bot=Non
 
 async def update_application_status(app_id: int, status: ApplicationStatusEnum, reason: str = None, employee_id: int = None):
     async for session in get_session():
-        stmt = update(Application).where(Application.id == app_id).values(
-            status=status,
-            status_reason=reason,
-            processed_by_id=employee_id
-        )
+        # Если статус PROBLEM, меняем тип очереди на _problem
+        if status == ApplicationStatusEnum.PROBLEM:
+            # Получаем текущее заявление, чтобы узнать его тип очереди
+            stmt = select(Application).where(Application.id == app_id)
+            result = await session.execute(stmt)
+            app = result.scalars().first()
+            
+            if app and not app.queue_type.endswith("_problem"):
+                # Меняем тип очереди на проблемную
+                new_queue_type = f"{app.queue_type}_problem"
+                stmt = update(Application).where(Application.id == app_id).values(
+                    status=status,
+                    status_reason=reason,
+                    processed_by_id=employee_id,
+                    queue_type=new_queue_type
+                )
+            else:
+                stmt = update(Application).where(Application.id == app_id).values(
+                    status=status,
+                    status_reason=reason,
+                    processed_by_id=employee_id
+                )
+        else:
+            stmt = update(Application).where(Application.id == app_id).values(
+                status=status,
+                status_reason=reason,
+                processed_by_id=employee_id
+            )
+        
         await session.execute(stmt)
         await session.commit()
 
@@ -371,7 +395,19 @@ async def start_work_day(employee_id: int):
 async def end_work_day(employee_id: int):
     """Завершить рабочий день"""
     async for session in get_session():
-        work_day = await get_current_work_day(employee_id)
+        # Получаем рабочий день в текущей сессии
+        today = get_moscow_date()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_end = datetime.combine(today, datetime.max.time())
+        
+        stmt = select(WorkDay).where(
+            WorkDay.employee_id == employee_id,
+            WorkDay.date >= today_start,
+            WorkDay.date <= today_end
+        )
+        result = await session.execute(stmt)
+        work_day = result.scalars().first()
+        
         if not work_day:
             return None
         
@@ -402,7 +438,19 @@ async def end_work_day(employee_id: int):
 async def start_break(employee_id: int):
     """Начать перерыв"""
     async for session in get_session():
-        work_day = await get_current_work_day(employee_id)
+        # Получаем рабочий день в текущей сессии
+        today = get_moscow_date()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_end = datetime.combine(today, datetime.max.time())
+        
+        stmt = select(WorkDay).where(
+            WorkDay.employee_id == employee_id,
+            WorkDay.date >= today_start,
+            WorkDay.date <= today_end
+        )
+        result = await session.execute(stmt)
+        work_day = result.scalars().first()
+        
         if not work_day:
             logger.warning(f"[start_break] Нет рабочего дня для employee_id={employee_id}")
             return None
@@ -442,7 +490,19 @@ async def start_break(employee_id: int):
 async def end_break(employee_id: int):
     """Завершить перерыв"""
     async for session in get_session():
-        work_day = await get_current_work_day(employee_id)
+        # Получаем рабочий день в текущей сессии
+        today = get_moscow_date()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_end = datetime.combine(today, datetime.max.time())
+        
+        stmt = select(WorkDay).where(
+            WorkDay.employee_id == employee_id,
+            WorkDay.date >= today_start,
+            WorkDay.date <= today_end
+        )
+        result = await session.execute(stmt)
+        work_day = result.scalars().first()
+        
         if not work_day:
             print(f"[end_break] Нет рабочего дня для employee_id={employee_id}")
             return None

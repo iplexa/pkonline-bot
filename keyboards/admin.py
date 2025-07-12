@@ -88,6 +88,7 @@ def admin_application_edit_keyboard(app_id: int):
         [InlineKeyboardButton(text="👤 Назначить ответственного", callback_data=f"admin_edit_responsible_{app_id}")],
         [InlineKeyboardButton(text="⚠️ Изменить статус проблемы", callback_data=f"admin_edit_problem_status_{app_id}")],
         [InlineKeyboardButton(text="🗑️ Удалить заявление", callback_data=f"admin_delete_application_{app_id}")],
+        [InlineKeyboardButton(text="🔍 Найти снова", callback_data="admin_search_by_fio")],
         [InlineKeyboardButton(text="🔙 Назад к поиску", callback_data="admin_search_applications")]
     ])
 

@@ -1072,10 +1072,35 @@ async def admin_edit_fio_process(message: Message, state: FSMContext):
         # Возвращаемся к редактированию заявления
         app = await get_application_by_id(app_id)
         if app:
-            await admin_edit_application_menu(
-                type('CallbackQuery', (), {'data': f'admin_edit_application_{app_id}', 'message': message, 'from_user': message.from_user})(),
-                state
-            )
+            # Формируем подробную информацию о заявлении
+            status_emoji = {
+                'queued': '⏳',
+                'in_progress': '🔄',
+                'accepted': '✅',
+                'rejected': '❌',
+                'problem': '⚠️'
+            }.get(app.status.value, '❓')
+            
+            queue_name = {
+                'lk': 'ЛК',
+                'epgu': 'ЕПГУ',
+                'epgu_mail': 'ЕПГУ (почта)',
+                'epgu_problem': 'ЕПГУ (проблемы)'
+            }.get(app.queue_type, app.queue_type)
+            
+            text = f"📋 <b>Редактирование заявления</b>\n\n"
+            text += f"🆔 <b>ID:</b> {app.id}\n"
+            text += f"👤 <b>ФИО:</b> {app.fio}\n"
+            text += f"📅 <b>Дата подачи:</b> {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
+            text += f"🏛️ <b>Очередь:</b> {queue_name}\n"
+            text += f"📊 <b>Статус:</b> {status_emoji} {app.status.value}\n"
+            text += f"💬 <b>Причина:</b> {app.status_reason or '-'}\n"
+            text += f"👤 <b>Обработал:</b> {app.processed_by.fio if app.processed_by else '-'}\n"
+            text += f"⚠️ <b>Статус проблемы:</b> {app.problem_status.value if app.problem_status else '-'}\n"
+            text += f"💬 <b>Комментарий проблемы:</b> {app.problem_comment or '-'}\n"
+            text += f"👤 <b>Ответственный:</b> {app.problem_responsible or '-'}\n"
+            
+            await message.answer(text, reply_markup=admin_application_edit_keyboard(app_id), parse_mode="HTML")
     else:
         await message.answer("❌ Ошибка при изменении ФИО", reply_markup=admin_cancel_keyboard())
     
@@ -1129,7 +1154,35 @@ async def admin_set_queue(callback: CallbackQuery, state: FSMContext):
         # Возвращаемся к редактированию заявления
         app = await get_application_by_id(app_id)
         if app:
-            await admin_edit_application_menu(callback, state)
+            # Формируем подробную информацию о заявлении
+            status_emoji = {
+                'queued': '⏳',
+                'in_progress': '🔄',
+                'accepted': '✅',
+                'rejected': '❌',
+                'problem': '⚠️'
+            }.get(app.status.value, '❓')
+            
+            queue_name = {
+                'lk': 'ЛК',
+                'epgu': 'ЕПГУ',
+                'epgu_mail': 'ЕПГУ (почта)',
+                'epgu_problem': 'ЕПГУ (проблемы)'
+            }.get(app.queue_type, app.queue_type)
+            
+            text = f"📋 <b>Редактирование заявления</b>\n\n"
+            text += f"🆔 <b>ID:</b> {app.id}\n"
+            text += f"👤 <b>ФИО:</b> {app.fio}\n"
+            text += f"📅 <b>Дата подачи:</b> {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
+            text += f"🏛️ <b>Очередь:</b> {queue_name}\n"
+            text += f"📊 <b>Статус:</b> {status_emoji} {app.status.value}\n"
+            text += f"💬 <b>Причина:</b> {app.status_reason or '-'}\n"
+            text += f"👤 <b>Обработал:</b> {app.processed_by.fio if app.processed_by else '-'}\n"
+            text += f"⚠️ <b>Статус проблемы:</b> {app.problem_status.value if app.problem_status else '-'}\n"
+            text += f"💬 <b>Комментарий проблемы:</b> {app.problem_comment or '-'}\n"
+            text += f"👤 <b>Ответственный:</b> {app.problem_responsible or '-'}\n"
+            
+            await callback.message.edit_text(text, reply_markup=admin_application_edit_keyboard(app_id), parse_mode="HTML")
     else:
         await callback.message.edit_text("❌ Ошибка при изменении очереди", reply_markup=admin_cancel_keyboard())
 
@@ -1195,7 +1248,35 @@ async def admin_set_status(callback: CallbackQuery, state: FSMContext):
             # Возвращаемся к редактированию заявления
             app = await get_application_by_id(app_id)
             if app:
-                await admin_edit_application_menu(callback, state)
+                # Формируем подробную информацию о заявлении
+                status_emoji = {
+                    'queued': '⏳',
+                    'in_progress': '🔄',
+                    'accepted': '✅',
+                    'rejected': '❌',
+                    'problem': '⚠️'
+                }.get(app.status.value, '❓')
+                
+                queue_name = {
+                    'lk': 'ЛК',
+                    'epgu': 'ЕПГУ',
+                    'epgu_mail': 'ЕПГУ (почта)',
+                    'epgu_problem': 'ЕПГУ (проблемы)'
+                }.get(app.queue_type, app.queue_type)
+                
+                text = f"📋 <b>Редактирование заявления</b>\n\n"
+                text += f"🆔 <b>ID:</b> {app.id}\n"
+                text += f"👤 <b>ФИО:</b> {app.fio}\n"
+                text += f"📅 <b>Дата подачи:</b> {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
+                text += f"🏛️ <b>Очередь:</b> {queue_name}\n"
+                text += f"📊 <b>Статус:</b> {status_emoji} {app.status.value}\n"
+                text += f"💬 <b>Причина:</b> {app.status_reason or '-'}\n"
+                text += f"👤 <b>Обработал:</b> {app.processed_by.fio if app.processed_by else '-'}\n"
+                text += f"⚠️ <b>Статус проблемы:</b> {app.problem_status.value if app.problem_status else '-'}\n"
+                text += f"💬 <b>Комментарий проблемы:</b> {app.problem_comment or '-'}\n"
+                text += f"👤 <b>Ответственный:</b> {app.problem_responsible or '-'}\n"
+                
+                await callback.message.edit_text(text, reply_markup=admin_application_edit_keyboard(app_id), parse_mode="HTML")
         else:
             await callback.message.edit_text("❌ Ошибка при изменении статуса", reply_markup=admin_cancel_keyboard())
 
@@ -1227,10 +1308,35 @@ async def admin_edit_reason_process(message: Message, state: FSMContext):
         # Возвращаемся к редактированию заявления
         app = await get_application_by_id(app_id)
         if app:
-            await admin_edit_application_menu(
-                type('CallbackQuery', (), {'data': f'admin_edit_application_{app_id}', 'message': message, 'from_user': message.from_user})(),
-                state
-            )
+            # Формируем подробную информацию о заявлении
+            status_emoji = {
+                'queued': '⏳',
+                'in_progress': '🔄',
+                'accepted': '✅',
+                'rejected': '❌',
+                'problem': '⚠️'
+            }.get(app.status.value, '❓')
+            
+            queue_name = {
+                'lk': 'ЛК',
+                'epgu': 'ЕПГУ',
+                'epgu_mail': 'ЕПГУ (почта)',
+                'epgu_problem': 'ЕПГУ (проблемы)'
+            }.get(app.queue_type, app.queue_type)
+            
+            text = f"📋 <b>Редактирование заявления</b>\n\n"
+            text += f"🆔 <b>ID:</b> {app.id}\n"
+            text += f"👤 <b>ФИО:</b> {app.fio}\n"
+            text += f"📅 <b>Дата подачи:</b> {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
+            text += f"🏛️ <b>Очередь:</b> {queue_name}\n"
+            text += f"📊 <b>Статус:</b> {status_emoji} {app.status.value}\n"
+            text += f"💬 <b>Причина:</b> {app.status_reason or '-'}\n"
+            text += f"👤 <b>Обработал:</b> {app.processed_by.fio if app.processed_by else '-'}\n"
+            text += f"⚠️ <b>Статус проблемы:</b> {app.problem_status.value if app.problem_status else '-'}\n"
+            text += f"💬 <b>Комментарий проблемы:</b> {app.problem_comment or '-'}\n"
+            text += f"👤 <b>Ответственный:</b> {app.problem_responsible or '-'}\n"
+            
+            await message.answer(text, reply_markup=admin_application_edit_keyboard(app_id), parse_mode="HTML")
     else:
         await message.answer("❌ Ошибка при изменении причины", reply_markup=admin_cancel_keyboard())
     
@@ -1264,10 +1370,35 @@ async def admin_edit_responsible_process(message: Message, state: FSMContext):
         # Возвращаемся к редактированию заявления
         app = await get_application_by_id(app_id)
         if app:
-            await admin_edit_application_menu(
-                type('CallbackQuery', (), {'data': f'admin_edit_application_{app_id}', 'message': message, 'from_user': message.from_user})(),
-                state
-            )
+            # Формируем подробную информацию о заявлении
+            status_emoji = {
+                'queued': '⏳',
+                'in_progress': '🔄',
+                'accepted': '✅',
+                'rejected': '❌',
+                'problem': '⚠️'
+            }.get(app.status.value, '❓')
+            
+            queue_name = {
+                'lk': 'ЛК',
+                'epgu': 'ЕПГУ',
+                'epgu_mail': 'ЕПГУ (почта)',
+                'epgu_problem': 'ЕПГУ (проблемы)'
+            }.get(app.queue_type, app.queue_type)
+            
+            text = f"📋 <b>Редактирование заявления</b>\n\n"
+            text += f"🆔 <b>ID:</b> {app.id}\n"
+            text += f"👤 <b>ФИО:</b> {app.fio}\n"
+            text += f"📅 <b>Дата подачи:</b> {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
+            text += f"🏛️ <b>Очередь:</b> {queue_name}\n"
+            text += f"📊 <b>Статус:</b> {status_emoji} {app.status.value}\n"
+            text += f"💬 <b>Причина:</b> {app.status_reason or '-'}\n"
+            text += f"👤 <b>Обработал:</b> {app.processed_by.fio if app.processed_by else '-'}\n"
+            text += f"⚠️ <b>Статус проблемы:</b> {app.problem_status.value if app.problem_status else '-'}\n"
+            text += f"💬 <b>Комментарий проблемы:</b> {app.problem_comment or '-'}\n"
+            text += f"👤 <b>Ответственный:</b> {app.problem_responsible or '-'}\n"
+            
+            await message.answer(text, reply_markup=admin_application_edit_keyboard(app_id), parse_mode="HTML")
     else:
         await message.answer("❌ Ошибка при изменении ответственного", reply_markup=admin_cancel_keyboard())
     
@@ -1292,19 +1423,19 @@ async def admin_set_problem_status(callback: CallbackQuery, state: FSMContext):
     # Правильно парсим callback_data
     data = callback.data.replace("admin_set_problem_status_", "")
     
-    # Определяем статус и ID заявления
-    if data.startswith("solved_return_"):
-        status_name = "solved_return"
-        app_id = int(data.replace("solved_return_", ""))
+    # Определяем статус проблемы и ID заявления
+    if data.startswith("new_"):
+        status_name = "new"
+        app_id = int(data.replace("new_", ""))
     elif data.startswith("in_progress_"):
         status_name = "in_progress"
         app_id = int(data.replace("in_progress_", ""))
     elif data.startswith("solved_"):
         status_name = "solved"
         app_id = int(data.replace("solved_", ""))
-    elif data.startswith("new_"):
-        status_name = "new"
-        app_id = int(data.replace("new_", ""))
+    elif data.startswith("solved_return_"):
+        status_name = "solved_return"
+        app_id = int(data.replace("solved_return_", ""))
     else:
         await callback.message.edit_text("❌ Неизвестный статус проблемы", reply_markup=admin_cancel_keyboard())
         return
@@ -1331,7 +1462,35 @@ async def admin_set_problem_status(callback: CallbackQuery, state: FSMContext):
             # Возвращаемся к редактированию заявления
             app = await get_application_by_id(app_id)
             if app:
-                await admin_edit_application_menu(callback, state)
+                # Формируем подробную информацию о заявлении
+                status_emoji = {
+                    'queued': '⏳',
+                    'in_progress': '🔄',
+                    'accepted': '✅',
+                    'rejected': '❌',
+                    'problem': '⚠️'
+                }.get(app.status.value, '❓')
+                
+                queue_name = {
+                    'lk': 'ЛК',
+                    'epgu': 'ЕПГУ',
+                    'epgu_mail': 'ЕПГУ (почта)',
+                    'epgu_problem': 'ЕПГУ (проблемы)'
+                }.get(app.queue_type, app.queue_type)
+                
+                text = f"📋 <b>Редактирование заявления</b>\n\n"
+                text += f"🆔 <b>ID:</b> {app.id}\n"
+                text += f"👤 <b>ФИО:</b> {app.fio}\n"
+                text += f"📅 <b>Дата подачи:</b> {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
+                text += f"🏛️ <b>Очередь:</b> {queue_name}\n"
+                text += f"📊 <b>Статус:</b> {status_emoji} {app.status.value}\n"
+                text += f"💬 <b>Причина:</b> {app.status_reason or '-'}\n"
+                text += f"👤 <b>Обработал:</b> {app.processed_by.fio if app.processed_by else '-'}\n"
+                text += f"⚠️ <b>Статус проблемы:</b> {app.problem_status.value if app.problem_status else '-'}\n"
+                text += f"💬 <b>Комментарий проблемы:</b> {app.problem_comment or '-'}\n"
+                text += f"👤 <b>Ответственный:</b> {app.problem_responsible or '-'}\n"
+                
+                await callback.message.edit_text(text, reply_markup=admin_application_edit_keyboard(app_id), parse_mode="HTML")
         else:
             await callback.message.edit_text("❌ Ошибка при изменении статуса проблемы", reply_markup=admin_cancel_keyboard())
 

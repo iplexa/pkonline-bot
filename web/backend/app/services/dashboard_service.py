@@ -7,13 +7,15 @@ from typing import List, Dict, Any
 
 def get_moscow_date():
     """Получить текущую дату в московском времени"""
-    # Используем локальное время контейнера, которое настроено на Москву
-    return datetime.now().date()
+    # Используем московское время
+    moscow_tz = pytz.timezone('Europe/Moscow')
+    return datetime.now(moscow_tz).date()
 
 def get_moscow_now():
     """Получить текущее время в московском времени"""
-    # Используем локальное время контейнера, которое настроено на Москву
-    return datetime.now()
+    # Используем московское время
+    moscow_tz = pytz.timezone('Europe/Moscow')
+    return datetime.now(moscow_tz).replace(tzinfo=None)
 
 class DashboardService:
     def __init__(self, db: Session):
@@ -26,6 +28,8 @@ class DashboardService:
         employees = self.db.query(Employee).all()
         result = []
         
+        print(f"DEBUG: Total employees found: {len(employees)}")
+        
         for emp in employees:
             # Получаем текущий рабочий день в московском времени
             today = get_moscow_date()
@@ -36,6 +40,12 @@ class DashboardService:
             yesterday = today - timedelta(days=1)
             yesterday_start = datetime.combine(yesterday, datetime.min.time())
             yesterday_end = datetime.combine(yesterday, datetime.max.time())
+            
+            # Проверим все рабочие дни этого сотрудника для отладки
+            all_work_days = self.db.query(WorkDay).filter(WorkDay.employee_id == emp.id).all()
+            print(f"DEBUG: Employee {emp.fio} (ID: {emp.id}) - All work days: {len(all_work_days)}")
+            for wd in all_work_days:
+                print(f"  - Work day: ID={wd.id}, date={wd.date}, start_time={wd.start_time}, end_time={wd.end_time}, status={wd.status}")
             
             # Сначала ищем активный рабочий день за сегодня
             work_day = self.db.query(WorkDay).filter(
@@ -79,6 +89,7 @@ class DashboardService:
             # Дополнительная отладка для понимания логики
             print(f"  - Today: {today}")
             print(f"  - Yesterday: {yesterday}")
+            print(f"  - Today range: {today_start} - {today_end}")
             
             status = "Не работает"
             current_task = None

@@ -34,8 +34,12 @@ def epgu_reason_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="❌ Отмена", callback_data="epgu_cancel_reason")]
     ])
 
-def epgu_escalate_keyboard(app_id: int, is_priority: bool):
+def epgu_escalate_keyboard(app_id: int, is_priority: bool, status: str = "queued"):
     buttons = []
+    # Кнопка обработки заявления (только если в очереди)
+    if status == "queued":
+        buttons.append([InlineKeyboardButton(text="🔄 Обработать заявление", callback_data=f"epgu_process_found_{app_id}")])
+    # Кнопка эскалации (только если не приоритетное)
     if not is_priority:
         buttons.append([InlineKeyboardButton(text="🚨 Эскалировать", callback_data=f"epgu_escalate_{app_id}")])
     buttons.append([InlineKeyboardButton(text="🔍 Найти еще", callback_data="epgu_search_fio")])

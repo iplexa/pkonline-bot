@@ -83,9 +83,13 @@ services:
       EXTERNAL_DB_USER: ${EXTERNAL_DB_USER}
       EXTERNAL_DB_PASSWORD: ${EXTERNAL_DB_PASSWORD}
       EXTERNAL_DB_SSL: ${EXTERNAL_DB_SSL:-false}
+      # Локальные настройки БД (если не используется внешняя)
+      POSTGRES_DB: ${POSTGRES_DB:-pkonline}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       # Настройки веб-интерфейса
-      SECRET_KEY: ${WEB_SECRET_KEY:-your-secret-key-change-in-production}
-      DEBUG: ${WEB_DEBUG:-false}
+      WEB_SECRET_KEY: ${WEB_SECRET_KEY:-your-secret-key-change-in-production}
+      WEB_DEBUG: ${WEB_DEBUG:-false}
       # Часовой пояс
       TZ: Europe/Moscow
     ports:

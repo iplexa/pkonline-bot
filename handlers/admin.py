@@ -3,7 +3,7 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from db.crud import (
-    add_employee, remove_employee, add_group_to_employee, remove_group_from_employee, list_employees_with_groups, is_admin, get_employee_by_tg_id, get_applications_by_queue_type, clear_queue_by_type, import_applications_from_excel, get_all_work_days_report,
+    add_employee, remove_employee, add_group_to_employee, remove_group_from_employee, list_employees_with_groups, is_admin, get_employee_by_tg_id, get_applications_by_queue_type, clear_queue_by_type, import_applications_from_excel, import_1c_applications_from_excel, get_all_work_days_report,
     get_applications_statistics_by_queue, search_applications_by_fio, update_application_field, delete_application, get_all_employees, export_overdue_mail_applications_to_excel, create_database_backup,
     update_employee_fio, get_employee_by_id, admin_start_work_day, admin_end_work_day
 )
@@ -36,6 +36,7 @@ class AdminQueueStates(StatesGroup):
     waiting_queue_type = State()
     waiting_upload_file = State()
     waiting_clear_confirm = State()
+    waiting_1c_upload_file = State()
 
 class AdminApplicationStates(StatesGroup):
     waiting_fio_search = State()
@@ -376,7 +377,7 @@ async def admin_upload_queue_file(message: Message, state: FSMContext):
     if not message.document:
         await message.answer("Пожалуйста, отправьте Excel-файл.")
         return
-    progress_msg = await message.answer("Документ получен. Начинаю скачивание...")
+    progress_msg = await message.answer("📄 Документ получен. Начинаю скачивание и обработку...")
     try:
         file = await message.bot.download(message.document)
         import os
@@ -384,8 +385,18 @@ async def admin_upload_queue_file(message: Message, state: FSMContext):
         with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
             tmp.write(file.getvalue())
             tmp_path = tmp.name
+        # Создаем callback для обновления сообщения о прогрессе
+        async def update_progress_message(text):
+            try:
+                await progress_msg.edit_text(
+                    f"📄 Документ получен. Начинаю скачивание и обработку...\n\n{text}",
+                    reply_markup=admin_queue_menu_keyboard()
+                )
+            except Exception:
+                pass  # Игнорируем ошибки обновления
+        
         from db.crud import import_applications_from_excel
-        result = await import_applications_from_excel(tmp_path, queue_type)
+        result = await import_applications_from_excel(tmp_path, queue_type, update_progress_message)
         os.unlink(tmp_path)
         # result может быть None, но мы можем получить данные из логов, либо возвращать из функции
         # Для пользователя выводим сколько добавлено, пропущено, всего строк
@@ -416,6 +427,101 @@ async def admin_upload_queue_file(message: Message, state: FSMContext):
         await state.clear()
     except Exception as e:
         await progress_msg.edit_text(f"Ошибка при импорте: {e}", reply_markup=admin_queue_menu_keyboard())
+        await state.clear()
+
+@router.callback_query(F.data == "admin_upload_1c")
+async def admin_upload_1c(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminQueueStates.waiting_1c_upload_file)
+    await callback.message.edit_text(
+        "Отправьте Excel-файл с выгрузкой из 1С для импорта заявлений ЛК и ЕПГУ.\n\n"
+        "Функция автоматически:\n"
+        "• Определит тип очереди по способу подачи\n"
+        "• Обработает статусы заявлений\n"
+        "• Обновит существующие заявления при изменениях\n"
+        "• Добавит новые заявления в соответствующие очереди",
+        reply_markup=admin_queue_menu_keyboard()
+    )
+
+@router.message(AdminQueueStates.waiting_1c_upload_file)
+async def admin_upload_1c_file(message: Message, state: FSMContext):
+    if not message.document:
+        await message.answer("Пожалуйста, отправьте Excel-файл с выгрузкой из 1С.")
+        return
+    
+    progress_msg = await message.answer("📄 Документ получен. Начинаю обработку выгрузки 1С...\n\n⏳ Обработка может занять некоторое время для больших файлов.")
+    
+    try:
+        file = await message.bot.download(message.document)
+        import os
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+            tmp.write(file.getvalue())
+            tmp_path = tmp.name
+        
+        # Создаем callback для обновления сообщения о прогрессе
+        async def update_progress_message(text):
+            try:
+                await progress_msg.edit_text(
+                    f"📄 Документ получен. Начинаю обработку выгрузки 1С...\n\n⏳ Обработка может занять некоторое время для больших файлов.\n\n{text}",
+                    reply_markup=admin_queue_menu_keyboard()
+                )
+            except Exception:
+                pass  # Игнорируем ошибки обновления
+        
+        # Импортируем заявления из 1С
+        result = await import_1c_applications_from_excel(tmp_path, update_progress_message)
+        os.unlink(tmp_path)
+        
+        # Формируем отчет
+        report_text = "📊 Импорт выгрузки 1С завершён\n\n"
+        
+        # ЛК заявления
+        lk_data = result.get('lk', {})
+        lk_added = lk_data.get('added', 0)
+        lk_updated = lk_data.get('updated', 0)
+        lk_skipped = lk_data.get('skipped', 0)
+        lk_total = lk_data.get('total', 0)
+        
+        report_text += f"📱 ЛК заявления:\n"
+        report_text += f"   Всего обработано: {lk_total}\n"
+        report_text += f"   Добавлено: {lk_added}\n"
+        report_text += f"   Обновлено: {lk_updated}\n"
+        report_text += f"   Пропущено: {lk_skipped}\n\n"
+        
+        # ЕПГУ заявления
+        epgu_data = result.get('epgu', {})
+        epgu_added = epgu_data.get('added', 0)
+        epgu_updated = epgu_data.get('updated', 0)
+        epgu_skipped = epgu_data.get('skipped', 0)
+        epgu_total = epgu_data.get('total', 0)
+        
+        report_text += f"🌐 ЕПГУ заявления:\n"
+        report_text += f"   Всего обработано: {epgu_total}\n"
+        report_text += f"   Добавлено: {epgu_added}\n"
+        report_text += f"   Обновлено: {epgu_updated}\n"
+        report_text += f"   Пропущено: {epgu_skipped}\n\n"
+        
+        # Логируем обновление очередей
+        telegram_logger = get_logger()
+        if telegram_logger:
+            emp = await get_employee_by_tg_id(str(message.from_user.id))
+            if emp:
+                if lk_added > 0 or lk_updated > 0:
+                    await telegram_logger.log_queue_updated('lk', emp.fio, lk_added + lk_updated)
+                if epgu_added > 0 or epgu_updated > 0:
+                    await telegram_logger.log_queue_updated('epgu', emp.fio, epgu_added + epgu_updated)
+        
+        await progress_msg.edit_text(
+            report_text,
+            reply_markup=admin_queue_menu_keyboard()
+        )
+        await state.clear()
+        
+    except Exception as e:
+        await progress_msg.edit_text(
+            f"❌ Ошибка при импорте выгрузки 1С: {str(e)}", 
+            reply_markup=admin_queue_menu_keyboard()
+        )
         await state.clear()
 
 @router.callback_query(F.data == "admin_reports_menu")
@@ -699,6 +805,94 @@ async def admin_add_test_employees(callback: CallbackQuery, state: FSMContext):
         message_text += "Добавленные сотрудники:\n"
         for emp_data in test_employees:
             message_text += f"• {emp_data['fio']} (ID: {emp_data['tg_id']})\n"
+    
+    await callback.message.edit_text(message_text, reply_markup=admin_staff_menu_keyboard())
+
+@router.callback_query(F.data == "admin_add_main_employees")
+async def admin_add_main_employees(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    # Основные сотрудники с группами
+    main_employees = [
+        {
+            "tg_id": "2019439815", 
+            "fio": "Чернякова Ксения Владленовна",
+            "groups": ["lk", "epgu", "mail", "problem"]
+        },
+        {
+            "tg_id": "1329555538", 
+            "fio": "Мукумова Виктория Денисовна",
+            "groups": ["lk", "epgu", "mail", "problem"]
+        },
+        {
+            "tg_id": "5163143779", 
+            "fio": "Горячева Диана Александровна",
+            "groups": ["lk"]
+        },
+        {
+            "tg_id": "1059622323", 
+            "fio": "Крюкова Полина Андреевна",
+            "groups": ["lk"]
+        },
+        {
+            "tg_id": "945793471", 
+            "fio": "Кожанова Арина Александровна",
+            "groups": ["lk"]
+        },
+        {
+            "tg_id": "1395039679", 
+            "fio": "Картоева Раяна Юнусовна",
+            "groups": ["lk"]
+        }
+    ]
+    
+    added_count = 0
+    already_exists_count = 0
+    groups_added_count = 0
+    
+    for emp_data in main_employees:
+        # Проверяем, существует ли уже сотрудник
+        existing_emp = await get_employee_by_tg_id(emp_data["tg_id"])
+        if existing_emp:
+            already_exists_count += 1
+            # Добавляем группы к существующему сотруднику
+            for group in emp_data["groups"]:
+                try:
+                    await add_group_to_employee(emp_data["tg_id"], group)
+                    groups_added_count += 1
+                except Exception as e:
+                    logging.error(f"Ошибка при добавлении группы {group} к {emp_data['fio']}: {e}")
+            continue
+        
+        # Добавляем сотрудника
+        try:
+            await add_employee(emp_data["tg_id"], emp_data["fio"])
+            added_count += 1
+            
+            # Добавляем группы к новому сотруднику
+            for group in emp_data["groups"]:
+                try:
+                    await add_group_to_employee(emp_data["tg_id"], group)
+                    groups_added_count += 1
+                except Exception as e:
+                    logging.error(f"Ошибка при добавлении группы {group} к {emp_data['fio']}: {e}")
+                    
+        except Exception as e:
+            logging.error(f"Ошибка при добавлении основного сотрудника {emp_data['fio']}: {e}")
+    
+    # Формируем сообщение о результате
+    message_text = f"✅ Создание основных сотрудников завершено!\n\n"
+    message_text += f"➕ Добавлено сотрудников: {added_count}\n"
+    message_text += f"⚠️ Уже существовало: {already_exists_count}\n"
+    message_text += f"🏷️ Добавлено групп: {groups_added_count}\n\n"
+    
+    if added_count > 0:
+        message_text += "Добавленные сотрудники:\n"
+        for emp_data in main_employees:
+            groups_str = ", ".join(emp_data["groups"])
+            message_text += f"• {emp_data['fio']} (ID: {emp_data['tg_id']})\n"
+            message_text += f"  Группы: {groups_str}\n\n"
     
     await callback.message.edit_text(message_text, reply_markup=admin_staff_menu_keyboard())
 

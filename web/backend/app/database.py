@@ -1,14 +1,21 @@
 import sys
 import os
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
 
 # Добавляем путь к родительской директории для импорта модулей бота
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from db.session import get_session as get_bot_session
+from app.config import DATABASE_URL
 
-# Используем существующую сессию из бота
-async def get_session():
-    async for session in get_bot_session():
-        yield session 
+# Создаем синхронный движок
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def get_db():
+    """Получить сессию базы данных"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close() 

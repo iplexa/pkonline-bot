@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, date
 from .session import get_session
 import aiohttp
 import tempfile
-from utils.excel import parse_lk_applications_from_excel, parse_epgu_applications_from_excel
+from utils.excel import parse_lk_applications_from_excel, parse_epgu_applications_from_excel, parse_1c_applications_from_excel
 import pytz
 import logging
 import pandas as pd
@@ -254,7 +254,7 @@ async def clear_queue_by_type(queue_type: str):
         )
         await session.commit()
 
-async def import_applications_from_excel(file_path, queue_type: str):
+async def import_applications_from_excel(file_path, queue_type: str, progress_callback=None):
     import os
     from utils.excel import parse_lk_applications_from_excel, parse_epgu_applications_from_excel
     if queue_type == "lk":
@@ -263,6 +263,13 @@ async def import_applications_from_excel(file_path, queue_type: str):
         applications = parse_epgu_applications_from_excel(file_path)
     else:
         applications = []
+    
+    # Отправляем информацию о количестве строк для обработки
+    if progress_callback:
+        try:
+            await progress_callback(f"📊 Найдено строк для импорта: {len(applications)}\n💾 Начинаю работу с базой данных...")
+        except:
+            pass
     logger = logging.getLogger("epgu_import")
     logger.info(f"Импорт заявлений: очередь={queue_type}, всего строк в файле: {len(applications)}")
     added = 0
@@ -277,7 +284,17 @@ async def import_applications_from_excel(file_path, queue_type: str):
                 )
             )
             existing_keys = set((fio, submitted_at) for fio, submitted_at in existing.fetchall())
+            processed_count = 0
             for app in applications:
+                processed_count += 1
+                
+                # Показываем прогресс каждые 250 строк
+                if processed_count % 250 == 0 and progress_callback:
+                    try:
+                        await progress_callback(f"💾 Обрабатываю заявления: {processed_count}/{len(applications)}")
+                    except:
+                        pass
+                
                 key = (app["fio"], app["submitted_at"])
                 if key in existing_keys:
                     skipped += 1
@@ -292,6 +309,14 @@ async def import_applications_from_excel(file_path, queue_type: str):
                 session.add(new_app)
                 added += 1
             await session.commit()
+            
+            # Отправляем финальное сообщение о завершении
+            if progress_callback:
+                try:
+                    await progress_callback(f"✅ Обработка завершена. Добавлено: {added}, пропущено: {skipped}")
+                except:
+                    pass
+            
             logger.info(f"Добавлено заявлений: {added}, пропущено: {skipped}")
             if skipped_details:
                 logger.info("Пропущенные строки (уже есть в базе):\n" + "\n".join(skipped_details))
@@ -304,7 +329,17 @@ async def import_applications_from_excel(file_path, queue_type: str):
                 )
             )
             existing_fios = set(fio for (fio,) in existing.fetchall())
+            processed_count = 0
             for app in applications:
+                processed_count += 1
+                
+                # Показываем прогресс каждые 250 строк
+                if processed_count % 250 == 0 and progress_callback:
+                    try:
+                        await progress_callback(f"💾 Обрабатываю заявления: {processed_count}/{len(applications)}")
+                    except:
+                        pass
+                
                 if app["fio"] in existing_fios:
                     skipped += 1
                     continue
@@ -318,6 +353,14 @@ async def import_applications_from_excel(file_path, queue_type: str):
                 session.add(new_app)
                 added += 1
             await session.commit()
+            
+            # Отправляем финальное сообщение о завершении
+            if progress_callback:
+                try:
+                    await progress_callback(f"✅ Обработка завершена. Добавлено: {added}, пропущено: {skipped}")
+                except:
+                    pass
+            
             logger.info(f"Добавлено заявлений: {added}, пропущено: {skipped}")
     logger.info(f"Импорт завершен: очередь={queue_type}, добавлено={added}, пропущено={skipped}")
     return added, skipped, len(applications)
@@ -1136,4 +1179,172 @@ async def manual_cleanup_expired_applications(bot=None):
                 except Exception:
                     pass  # Игнорируем ошибки отправки сотруднику
     
-    return expired_apps 
+    return expired_apps
+
+async def import_1c_applications_from_excel(file_path, progress_callback=None):
+    """
+    Импорт заявлений из выгрузки 1С с проверкой изменений
+    """
+    from utils.excel import parse_1c_applications_from_excel
+    
+    # Парсим файл с callback для обновления прогресса
+    parsed_data = await parse_1c_applications_from_excel(file_path, progress_callback)
+    
+    logger = logging.getLogger("1c_import")
+    logger.info(f"Импорт заявлений из 1С: ЛК={len(parsed_data['lk'])}, ЕПГУ={len(parsed_data['epgu'])}")
+    
+    # Отправляем информацию о начале работы с БД
+    if progress_callback:
+        try:
+            await progress_callback(f"💾 Начинаю работу с базой данных...\nЛК: {len(parsed_data['lk'])} заявлений\nЕПГУ: {len(parsed_data['epgu'])} заявлений")
+        except:
+            pass
+    
+    results = {}
+    
+    async for session in get_session():
+        # Обрабатываем ЛК заявления
+        lk_added = 0
+        lk_updated = 0
+        lk_skipped = 0
+        
+        lk_processed = 0
+        for app in parsed_data['lk']:
+            lk_processed += 1
+            
+            # Показываем прогресс каждые 250 ЛК заявлений
+            if lk_processed % 250 == 0 and progress_callback:
+                try:
+                    await progress_callback(f"💾 Обрабатываю ЛК заявления: {lk_processed}/{len(parsed_data['lk'])}")
+                except:
+                    pass
+            
+            # Проверяем существующее заявление
+            existing = await session.execute(
+                select(Application).where(
+                    Application.fio == app['fio'],
+                    Application.queue_type == 'lk'
+                )
+            )
+            existing_app = existing.scalars().first()
+            
+            if existing_app:
+                # Заявление уже существует - проверяем изменения
+                if existing_app.status.value != app['status'] or existing_app.is_priority != app['is_priority']:
+                    # Обновляем статус
+                    existing_app.status = ApplicationStatusEnum(app['status'])
+                    existing_app.is_priority = app['is_priority']
+                    if app['status_reason']:
+                        existing_app.status_reason = app['status_reason']
+                    if app['status'] in ['accepted', 'rejected']:
+                        existing_app.processed_at = get_moscow_now()
+                    lk_updated += 1
+                    logger.info(f"Обновлено ЛК заявление: {app['fio']} - {app['status']}")
+                else:
+                    lk_skipped += 1
+            else:
+                # Новое заявление
+                new_app = Application(
+                    fio=app['fio'],
+                    submitted_at=app['submitted_at'],
+                    queue_type='lk',
+                    status=ApplicationStatusEnum(app['status']),
+                    is_priority=app['is_priority'],
+                    status_reason=app['status_reason']
+                )
+                if app['status'] in ['accepted', 'rejected']:
+                    new_app.processed_at = get_moscow_now()
+                session.add(new_app)
+                lk_added += 1
+                logger.info(f"Добавлено ЛК заявление: {app['fio']} - {app['status']}")
+        
+        # Обрабатываем ЕПГУ заявления
+        epgu_added = 0
+        epgu_updated = 0
+        epgu_skipped = 0
+        
+        # Отправляем информацию о завершении ЛК и начале ЕПГУ
+        if progress_callback:
+            try:
+                await progress_callback(f"✅ ЛК заявления обработаны\n💾 Начинаю обработку ЕПГУ заявлений...")
+            except:
+                pass
+        
+        epgu_processed = 0
+        for app in parsed_data['epgu']:
+            epgu_processed += 1
+            
+            # Показываем прогресс каждые 250 ЕПГУ заявлений
+            if epgu_processed % 250 == 0 and progress_callback:
+                try:
+                    await progress_callback(f"💾 Обрабатываю ЕПГУ заявления: {epgu_processed}/{len(parsed_data['epgu'])}")
+                except:
+                    pass
+            
+            # Проверяем существующее заявление
+            existing = await session.execute(
+                select(Application).where(
+                    Application.fio == app['fio'],
+                    Application.submitted_at == app['submitted_at'],
+                    Application.queue_type == 'epgu'
+                )
+            )
+            existing_app = existing.scalars().first()
+            
+            if existing_app:
+                # Заявление уже существует - проверяем изменения
+                if existing_app.status.value != app['status']:
+                    # Обновляем статус
+                    existing_app.status = ApplicationStatusEnum(app['status'])
+                    if app['status_reason']:
+                        existing_app.status_reason = app['status_reason']
+                    if app['status'] in ['accepted', 'rejected']:
+                        existing_app.processed_at = get_moscow_now()
+                    epgu_updated += 1
+                    logger.info(f"Обновлено ЕПГУ заявление: {app['fio']} - {app['status']}")
+                else:
+                    epgu_skipped += 1
+            else:
+                # Новое заявление
+                new_app = Application(
+                    fio=app['fio'],
+                    submitted_at=app['submitted_at'],
+                    queue_type='epgu',
+                    status=ApplicationStatusEnum(app['status']),
+                    is_priority=app['is_priority'],
+                    status_reason=app['status_reason']
+                )
+                if app['status'] in ['accepted', 'rejected']:
+                    new_app.processed_at = get_moscow_now()
+                session.add(new_app)
+                epgu_added += 1
+                logger.info(f"Добавлено ЕПГУ заявление: {app['fio']} - {app['status']}")
+        
+        await session.commit()
+        
+        # Отправляем финальное сообщение о завершении работы с БД
+        if progress_callback:
+            try:
+                await progress_callback(f"✅ Работа с базой данных завершена\n💾 Сохраняю изменения...")
+            except:
+                pass
+        
+        results = {
+            'lk': {
+                'added': lk_added,
+                'updated': lk_updated,
+                'skipped': lk_skipped,
+                'total': len(parsed_data['lk'])
+            },
+            'epgu': {
+                'added': epgu_added,
+                'updated': epgu_updated,
+                'skipped': epgu_skipped,
+                'total': len(parsed_data['epgu'])
+            }
+        }
+        
+        logger.info(f"Импорт завершен: ЛК добавлено={lk_added}, обновлено={lk_updated}, пропущено={lk_skipped}")
+        logger.info(f"Импорт завершен: ЕПГУ добавлено={epgu_added}, обновлено={epgu_updated}, пропущено={epgu_skipped}")
+    
+    return results 

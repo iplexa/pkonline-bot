@@ -14,6 +14,7 @@ def admin_staff_menu_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Добавить сотрудника", callback_data="admin_add_employee")],
         [InlineKeyboardButton(text="➕ Добавить тестовых сотрудников", callback_data="admin_add_test_employees")],
+        [InlineKeyboardButton(text="👥 Создать основных сотрудников", callback_data="admin_add_main_employees")],
         [InlineKeyboardButton(text="✏️ Изменить ФИО сотрудника", callback_data="admin_edit_employee_fio")],
         [InlineKeyboardButton(text="➖ Удалить сотрудника", callback_data="admin_remove_employee")],
         [InlineKeyboardButton(text="➕ Добавить группу сотруднику", callback_data="admin_add_group")],
@@ -28,6 +29,7 @@ def admin_queue_menu_keyboard():
         [InlineKeyboardButton(text="👁️ Просмотр очереди", callback_data="admin_view_queue")],
         [InlineKeyboardButton(text="🗑️ Очистить очередь", callback_data="admin_clear_queue")],
         [InlineKeyboardButton(text="📤 Загрузить заявления", callback_data="admin_upload_queue")],
+        [InlineKeyboardButton(text="📊 Импорт выгрузки 1С", callback_data="admin_upload_1c")],
         [InlineKeyboardButton(text="💾 Создать бэкап БД", callback_data="admin_create_backup")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_menu")]
     ])
@@ -45,6 +47,8 @@ def group_choice_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="ЛК", callback_data="group_lk")],
         [InlineKeyboardButton(text="ЕПГУ", callback_data="group_epgu")],
+        [InlineKeyboardButton(text="Почта", callback_data="group_mail")],
+        [InlineKeyboardButton(text="Разбор проблем", callback_data="group_problem")],
         [InlineKeyboardButton(text="Эскалация", callback_data="group_escalation")]
     ])
 

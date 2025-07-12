@@ -1,237 +1,327 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Row, Col, Card, Badge, Button, Navbar } from 'react-bootstrap';
-import { FaUsers, FaClipboardList, FaChartBar, FaSignOutAlt, FaSync } from 'react-icons/fa';
-import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
+import { useAuth } from '../contexts/AuthContext';
+import Charts from './Charts';
 
-function Dashboard() {
-  const { logout } = useAuth();
-  const [employees, setEmployees] = useState([]);
-  const [applications, setApplications] = useState([]);
-  const [queueStats, setQueueStats] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState(new Date());
+const Dashboard = () => {
+    const { isAuthenticated, user, logout } = useAuth();
+    const [data, setData] = useState({
+        employees: [],
+        recentApplications: [],
+        queueStats: {}
+    });
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [selectedQueue, setSelectedQueue] = useState(null);
+    const [queueApplications, setQueueApplications] = useState([]);
 
-  const fetchData = async () => {
-    try {
-      const [employeesRes, applicationsRes, statsRes] = await Promise.all([
-        axios.get('/dashboard/employees/status'),
-        axios.get('/dashboard/applications/recent'),
-        axios.get('/dashboard/queues/statistics')
-      ]);
+    useEffect(() => {
+        if (isAuthenticated) {
+            fetchData();
+            const interval = setInterval(fetchData, 30000); // Refresh every 30 seconds
+            return () => clearInterval(interval);
+        }
+    }, [isAuthenticated]);
 
-      setEmployees(employeesRes.data);
-      setApplications(applicationsRes.data);
-      setQueueStats(statsRes.data);
-      setLastUpdate(new Date());
-    } catch (error) {
-      console.error('Ошибка загрузки данных:', error);
-    } finally {
-      setLoading(false);
+    const fetchData = async () => {
+        try {
+            setLoading(true);
+            const [employeesRes, applicationsRes, statsRes] = await Promise.all([
+                axios.get('/dashboard/employees/status'),
+                axios.get('/dashboard/applications/recent'),
+                axios.get('/dashboard/queues/statistics')
+            ]);
+
+            setData({
+                employees: employeesRes.data,
+                recentApplications: applicationsRes.data,
+                queueStats: statsRes.data
+            });
+        } catch (err) {
+            console.error('Error fetching data:', err);
+            if (err.response?.status === 401) {
+                logout();
+            } else {
+                setError('Ошибка загрузки данных');
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const fetchQueueApplications = async (queueType) => {
+        try {
+            const response = await axios.get(`/dashboard/queues/${queueType}/applications`);
+            setQueueApplications(response.data);
+            setSelectedQueue(queueType);
+        } catch (err) {
+            console.error('Error fetching queue applications:', err);
+        }
+    };
+
+    const closeQueueView = () => {
+        setSelectedQueue(null);
+        setQueueApplications([]);
+    };
+
+    const handleLogout = () => {
+        logout();
+    };
+
+    if (loading) {
+        return (
+            <div className="container mt-5">
+                <div className="d-flex justify-content-center">
+                    <div className="spinner-border text-primary" role="status">
+                        <span className="visually-hidden">Загрузка...</span>
+                    </div>
+                </div>
+            </div>
+        );
     }
-  };
 
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 30000); // Обновление каждые 30 секунд
-    return () => clearInterval(interval);
-  }, []);
+    if (error) {
+        return (
+            <div className="container mt-5">
+                <div className="alert alert-danger" role="alert">
+                    {error}
+                </div>
+            </div>
+        );
+    }
 
-  const getStatusBadge = (status) => {
-    const statusConfig = {
-      'На рабочем месте': { variant: 'success', icon: '🟢' },
-      'На перерыве': { variant: 'warning', icon: '🟡' },
-      'Не работает': { variant: 'secondary', icon: '⚫' }
-    };
-    
-    const config = statusConfig[status] || { variant: 'secondary', icon: '❓' };
+    if (selectedQueue) {
+        return (
+            <div className="container mt-4">
+                <div className="d-flex justify-content-between align-items-center mb-4">
+                    <h1>Очередь: {data.queueStats.find(q => q.queue_type === selectedQueue)?.queue_name || selectedQueue}</h1>
+                    <button onClick={closeQueueView} className="btn btn-outline-secondary">
+                        <i className="fas fa-arrow-left me-2"></i>
+                        Назад к дашборду
+                    </button>
+                </div>
+                
+                <div className="card">
+                    <div className="card-header">
+                        <h5>Заявления в очереди</h5>
+                    </div>
+                    <div className="card-body">
+                        {queueApplications.length > 0 ? (
+                            <div className="table-responsive">
+                                <table className="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>ФИО</th>
+                                            <th>Статус</th>
+                                            <th>Время подачи</th>
+                                            <th>Обработано</th>
+                                            <th>Обработал</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {queueApplications.map((app, index) => (
+                                            <tr key={index}>
+                                                <td>{app.id}</td>
+                                                <td>{app.fio}</td>
+                                                <td>
+                                                    <span className={`badge ${
+                                                        app.status === 'accepted' ? 'bg-success' :
+                                                        app.status === 'rejected' ? 'bg-danger' :
+                                                        app.status === 'in_progress' ? 'bg-warning' :
+                                                        app.status === 'queued' ? 'bg-secondary' :
+                                                        'bg-info'
+                                                    }`}>
+                                                        {app.status}
+                                                    </span>
+                                                </td>
+                                                <td>{new Date(app.submitted_at).toLocaleString('ru-RU')}</td>
+                                                <td>{app.processed_at ? new Date(app.processed_at).toLocaleString('ru-RU') : '-'}</td>
+                                                <td>{app.processed_by_fio || '-'}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <p>Нет заявлений в очереди</p>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     return (
-      <Badge bg={config.variant} className="status-badge">
-        {config.icon} {status}
-      </Badge>
-    );
-  };
-
-  const getQueueTypeName = (type) => {
-    const names = {
-      'lk': 'Личный кабинет',
-      'epgu': 'ЕПГУ',
-      'epgu_mail': 'Почта',
-      'epgu_problem': 'Проблемные'
-    };
-    return names[type] || type;
-  };
-
-  const getStatusColor = (status) => {
-    const colors = {
-      'queued': 'warning',
-      'in_progress': 'info',
-      'accepted': 'success',
-      'rejected': 'danger',
-      'problem': 'secondary'
-    };
-    return colors[status] || 'secondary';
-  };
-
-  const getEmployeeCardClass = (status) => {
-    if (status === 'На рабочем месте') return 'working';
-    if (status === 'На перерыве') return 'break';
-    return 'offline';
-  };
-
-  return (
-    <div>
-      {/* Навигационная панель */}
-      <Navbar bg="dark" variant="dark" className="mb-4">
-        <Container fluid>
-          <Navbar.Brand>
-            <FaUsers className="me-2" />
-            PK Online Dashboard
-          </Navbar.Brand>
-          <div className="d-flex align-items-center">
-            <small className="text-light me-3">
-              Обновлено: {lastUpdate.toLocaleTimeString()}
-            </small>
-            <Button 
-              variant="outline-light" 
-              size="sm" 
-              className="me-2"
-              onClick={fetchData}
-              disabled={loading}
-            >
-              <FaSync className={loading ? 'fa-spin' : ''} />
-            </Button>
-            <Button variant="outline-light" size="sm" onClick={logout}>
-              <FaSignOutAlt />
-            </Button>
-          </div>
-        </Container>
-      </Navbar>
-
-      <Container fluid>
-        {/* Статистика очередей */}
-        <Row className="mb-4">
-          <Col>
-            <Card className="queue-statistics">
-              <Card.Body>
-                <Card.Title className="text-white">
-                  <FaChartBar className="me-2" />
-                  Статистика очередей
-                </Card.Title>
-                <Row>
-                  {queueStats.map((stat) => (
-                    <Col key={stat.queue_type} md={3} className="mb-2">
-                      <div className="text-center">
-                        <h4 className="text-white mb-1">{stat.total}</h4>
-                        <small className="text-white-50">{getQueueTypeName(stat.queue_type)}</small>
-                        <div className="mt-2">
-                          <Badge bg="warning" className="me-1">{stat.queued}</Badge>
-                          <Badge bg="info" className="me-1">{stat.in_progress}</Badge>
-                          <Badge bg="success" className="me-1">{stat.accepted}</Badge>
-                          <Badge bg="danger" className="me-1">{stat.rejected}</Badge>
-                          <Badge bg="secondary">{stat.problem}</Badge>
+        <div className="container mt-4">
+            <div className="d-flex justify-content-between align-items-center mb-4">
+                <h1>Панель управления</h1>
+                <div className="d-flex align-items-center">
+                    <span className="me-3">Пользователь: {user?.fio}</span>
+                    <button onClick={handleLogout} className="btn btn-outline-danger">
+                        Выйти
+                    </button>
+                </div>
+            </div>
+            
+            <div className="row">
+                <div className="col-md-6 mb-4">
+                    <div className="card">
+                        <div className="card-header">
+                            <h5>Статус сотрудников</h5>
                         </div>
-                      </div>
-                    </Col>
-                  ))}
-                </Row>
-              </Card.Body>
-            </Card>
-          </Col>
-        </Row>
-
-        <Row>
-          {/* Сотрудники */}
-          <Col lg={6} className="mb-4">
-            <Card className="dashboard-card h-100">
-              <Card.Header>
-                <FaUsers className="me-2" />
-                Сотрудники ({employees.length})
-              </Card.Header>
-              <Card.Body className="p-0">
-                <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                  {employees.map((employee) => (
-                    <div 
-                      key={employee.id} 
-                      className={`employee-card p-3 border-bottom ${getEmployeeCardClass(employee.status)}`}
-                    >
-                      <div className="d-flex justify-content-between align-items-start">
-                        <div>
-                          <h6 className="mb-1">
-                            {employee.fio}
-                            {employee.is_admin && (
-                              <Badge bg="danger" className="ms-2">Админ</Badge>
+                        <div className="card-body">
+                            {data.employees.length > 0 ? (
+                                <ul className="list-group list-group-flush">
+                                    {data.employees.map((employee, index) => (
+                                        <li key={index} className="list-group-item">
+                                            <div className="d-flex justify-content-between align-items-start">
+                                                <div className="flex-grow-1">
+                                                    <div className="d-flex align-items-center mb-1">
+                                                        <strong>{employee.fio}</strong>
+                                                        {employee.is_admin && <span className="badge bg-primary ms-2">Админ</span>}
+                                                    </div>
+                                                    {employee.current_task && (
+                                                        <div className="small text-warning mb-1">
+                                                            <i className="fas fa-tasks me-1"></i>
+                                                            {employee.current_task}
+                                                        </div>
+                                                    )}
+                                                    {employee.last_processed && (
+                                                        <div className="small text-success mb-1">
+                                                            <i className="fas fa-check-circle me-1"></i>
+                                                            Последнее: {employee.last_processed}
+                                                        </div>
+                                                    )}
+                                                    {employee.work_duration && (
+                                                        <div className="small text-muted">
+                                                            <i className="fas fa-clock me-1"></i>
+                                                            {employee.work_duration}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <span className={`badge ${
+                                                    employee.status === 'На рабочем месте' ? 'bg-success' :
+                                                    employee.status === 'На перерыве' ? 'bg-warning' :
+                                                    employee.status === 'Рабочий день завершен' ? 'bg-info' :
+                                                    'bg-secondary'
+                                                }`}>
+                                                    {employee.status}
+                                                </span>
+                                            </div>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p>Нет данных о сотрудниках</p>
                             )}
-                          </h6>
-                          {getStatusBadge(employee.status)}
-                          {employee.current_task && (
-                            <div className="mt-2">
-                              <small className="text-muted">
-                                <strong>Текущая задача:</strong> {employee.current_task}
-                              </small>
-                            </div>
-                          )}
-                          {employee.work_duration && (
-                            <div className="mt-1">
-                              <small className="text-muted">
-                                Время работы: {employee.work_duration}
-                              </small>
-                            </div>
-                          )}
                         </div>
-                      </div>
                     </div>
-                  ))}
                 </div>
-              </Card.Body>
-            </Card>
-          </Col>
 
-          {/* Последние заявления */}
-          <Col lg={6} className="mb-4">
-            <Card className="dashboard-card h-100">
-              <Card.Header>
-                <FaClipboardList className="me-2" />
-                Последние обработанные заявления
-              </Card.Header>
-              <Card.Body className="p-0">
-                <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                  {applications.map((app) => (
-                    <div key={app.id} className="application-item p-3 border-bottom">
-                      <div className="d-flex justify-content-between align-items-start">
-                        <div>
-                          <h6 className="mb-1">Заявление #{app.id}</h6>
-                          <p className="mb-1"><strong>{app.fio}</strong></p>
-                          <div className="mb-2">
-                            <Badge bg="primary" className="me-2">
-                              {getQueueTypeName(app.queue_type)}
-                            </Badge>
-                            <Badge bg={getStatusColor(app.status)}>
-                              {app.status}
-                            </Badge>
-                          </div>
-                          {app.processed_by_fio && (
-                            <small className="text-muted">
-                              Обработал: {app.processed_by_fio}
-                            </small>
-                          )}
+                <div className="col-md-6 mb-4">
+                    <div className="card">
+                        <div className="card-header">
+                            <h5>Статистика очередей</h5>
                         </div>
-                        <div className="text-end">
-                          <small className="text-muted">
-                            {new Date(app.submitted_at).toLocaleDateString()}
-                          </small>
+                        <div className="card-body">
+                            {data.queueStats.length > 0 ? (
+                                <div>
+                                    {data.queueStats.map((queue, index) => (
+                                        <div key={index} className="mb-3 p-3 border rounded">
+                                            <div className="d-flex justify-content-between align-items-center mb-2">
+                                                <h6 className="mb-0">{queue.queue_name}</h6>
+                                                <button 
+                                                    onClick={() => fetchQueueApplications(queue.queue_type)}
+                                                    className="btn btn-sm btn-outline-primary"
+                                                >
+                                                    <i className="fas fa-eye me-1"></i>
+                                                    Просмотр
+                                                </button>
+                                            </div>
+                                            <div className="row text-center">
+                                                <div className="col-3">
+                                                    <div className="small text-muted">Всего</div>
+                                                    <div className="fw-bold">{queue.total}</div>
+                                                </div>
+                                                <div className="col-3">
+                                                    <div className="small text-muted">В очереди</div>
+                                                    <div className="fw-bold text-secondary">{queue.queued}</div>
+                                                </div>
+                                                <div className="col-3">
+                                                    <div className="small text-muted">В работе</div>
+                                                    <div className="fw-bold text-warning">{queue.in_progress}</div>
+                                                </div>
+                                                <div className="col-3">
+                                                    <div className="small text-muted">Обработано</div>
+                                                    <div className="fw-bold text-success">{queue.accepted + queue.rejected + queue.problem}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p>Нет данных о очередях</p>
+                            )}
                         </div>
-                      </div>
                     </div>
-                  ))}
                 </div>
-              </Card.Body>
-            </Card>
-          </Col>
-        </Row>
-      </Container>
-    </div>
-  );
-}
+            </div>
+
+            {/* Диаграммы статистики */}
+            <Charts />
+
+            <div className="row">
+                <div className="col-12">
+                    <div className="card">
+                        <div className="card-header">
+                            <h5>Последние обработанные заявления</h5>
+                        </div>
+                        <div className="card-body">
+                            {data.recentApplications.length > 0 ? (
+                                <div className="table-responsive">
+                                    <table className="table table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>ID</th>
+                                                <th>ФИО</th>
+                                                <th>Очередь</th>
+                                                <th>Статус</th>
+                                                <th>Время обработки</th>
+                                                <th>Обработал</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {data.recentApplications.map((app, index) => (
+                                                <tr key={index}>
+                                                    <td>{app.id}</td>
+                                                    <td>{app.fio}</td>
+                                                    <td>{app.queue_type}</td>
+                                                    <td>
+                                                        <span className={`badge ${
+                                                            app.status === 'accepted' ? 'bg-success' :
+                                                            app.status === 'rejected' ? 'bg-danger' :
+                                                            'bg-warning'
+                                                        }`}>
+                                                            {app.status}
+                                                        </span>
+                                                    </td>
+                                                    <td>{new Date(app.processed_at).toLocaleString('ru-RU')}</td>
+                                                    <td>{app.processed_by_fio || '-'}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            ) : (
+                                <p>Нет обработанных заявлений</p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 export default Dashboard; 

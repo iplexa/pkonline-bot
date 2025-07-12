@@ -5,10 +5,11 @@ from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from .config import settings
+from app.config import settings
 from .models import UserLogin, UserCreate, Token
-from .database import get_session
+from app.database import get_db
 from db.models import Employee
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -33,35 +34,39 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
     return encoded_jwt
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Employee:
-    """Получение текущего пользователя из токена"""
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
+    """Получить текущего пользователя из токена"""
     try:
         payload = jwt.decode(credentials.credentials, settings.secret_key, algorithms=[settings.algorithm])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
+        tg_id: str = payload.get("sub")
+        if tg_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
     except jwt.PyJWTError:
-        raise credentials_exception
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
-    async for session in get_session():
-        stmt = select(Employee).where(Employee.tg_id == username)
-        result = await session.execute(stmt)
-        user = result.scalars().first()
-        if user is None:
-            raise credentials_exception
-        return user
+    employee = db.query(Employee).filter(Employee.tg_id == tg_id).first()
+    if employee is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Employee not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return employee
 
-async def get_current_admin_user(current_user: Employee = Depends(get_current_user)) -> Employee:
-    """Проверка прав администратора"""
+def get_current_admin_user(current_user: Employee = Depends(get_current_user)) -> Employee:
+    """Получить текущего администратора"""
     if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
+            detail="Недостаточно прав"
         )
     return current_user
 

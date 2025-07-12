@@ -1,11 +1,9 @@
 from datetime import datetime, timedelta
 from typing import List, Optional
-from sqlalchemy import select, and_
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, and_, func
+from sqlalchemy.orm import Session
 import pytz
 
-from .database import get_session
-from .models import EmployeeStatus, ApplicationInfo, QueueStatistics
 from db.models import Employee, Application, WorkDay, WorkDayStatusEnum, ApplicationStatusEnum
 
 def get_moscow_date():
@@ -18,211 +16,284 @@ def get_moscow_now():
     # Используем локальное время контейнера, которое настроено на Москву
     return datetime.now()
 
-class EmployeeService:
-    """Сервис для работы с сотрудниками"""
-    
-    @staticmethod
-    async def get_employees_status() -> List[EmployeeStatus]:
-        """Получение статуса всех сотрудников"""
-        async for session in get_session():
-            # Получаем всех сотрудников
-            stmt = select(Employee).options(selectinload(Employee.work_days))
-            result = await session.execute(stmt)
-            employees = result.scalars().all()
-            
-            employee_statuses = []
-            for emp in employees:
-                # Получаем текущий рабочий день в московском времени
-                today = get_moscow_date()
-                today_start = datetime.combine(today, datetime.min.time())
-                today_end = datetime.combine(today, datetime.max.time())
-                
-                # Также проверяем вчерашний день, если сегодня нет активного рабочего дня
-                yesterday = today - timedelta(days=1)
-                yesterday_start = datetime.combine(yesterday, datetime.min.time())
-                yesterday_end = datetime.combine(yesterday, datetime.max.time())
-                
-                # Сначала ищем активный рабочий день за сегодня
-                stmt = select(WorkDay).where(
-                    and_(
-                        WorkDay.employee_id == emp.id,
-                        WorkDay.date >= today_start,
-                        WorkDay.date <= today_end,
-                        WorkDay.end_time.is_(None)  # Только активные дни
-                    )
-                ).options(selectinload(WorkDay.breaks))
-                result = await session.execute(stmt)
-                work_day = result.scalars().first()
-                
-                # Если нет активного дня за сегодня, ищем завершенный день за сегодня
-                if not work_day:
-                    stmt = select(WorkDay).where(
-                        and_(
-                            WorkDay.employee_id == emp.id,
-                            WorkDay.date >= today_start,
-                            WorkDay.date <= today_end,
-                            WorkDay.end_time.is_not(None)  # Только завершенные дни
-                        )
-                    ).options(selectinload(WorkDay.breaks))
-                    result = await session.execute(stmt)
-                    work_day = result.scalars().first()
-                
-                # Если нет дня за сегодня, ищем активный день за вчера
-                if not work_day:
-                    stmt = select(WorkDay).where(
-                        and_(
-                            WorkDay.employee_id == emp.id,
-                            WorkDay.date >= yesterday_start,
-                            WorkDay.date <= yesterday_end,
-                            WorkDay.end_time.is_(None)  # Только активные дни
-                        )
-                    ).options(selectinload(WorkDay.breaks))
-                    result = await session.execute(stmt)
-                    work_day = result.scalars().first()
-                
-                # Отладочная информация
-                print(f"DEBUG: Employee {emp.fio} (ID: {emp.id})")
-                if work_day:
-                    print(f"  - Work day found: ID={work_day.id}, date={work_day.date}, start_time={work_day.start_time}, end_time={work_day.end_time}, status={work_day.status}")
-                else:
-                    print(f"  - No work day found")
-                
-                # Дополнительная отладка для понимания логики
-                print(f"  - Today: {today}")
-                print(f"  - Yesterday: {yesterday}")
-                
-                status = "Не работает"
-                current_task = None
-                start_time = None
-                work_duration = None
-                
-                if work_day:  # Если есть рабочий день
-                    print(f"  - Processing work day: end_time={work_day.end_time}, status={work_day.status}")
-                    if work_day.start_time:  # И он начат
-                        if work_day.end_time:  # Если рабочий день завершен
-                            print(f"  - Work day is finished (has end_time)")
-                            status = "Рабочий день завершен"
-                            start_time = work_day.start_time
-                            if work_day.total_work_time:
-                                hours = work_day.total_work_time // 3600
-                                minutes = (work_day.total_work_time % 3600) // 60
-                                work_duration = f"{hours:02d}:{minutes:02d}"
-                        elif work_day.status == WorkDayStatusEnum.ACTIVE:
-                            print(f"  - Work day is active")
-                            status = "На рабочем месте"
-                            start_time = work_day.start_time
-                            if start_time:
-                                duration = get_moscow_now() - start_time
-                                work_duration = f"{duration.seconds // 3600:02d}:{(duration.seconds % 3600) // 60:02d}"
-                        elif work_day.status == WorkDayStatusEnum.PAUSED:
-                            print(f"  - Work day is paused")
-                            status = "На перерыве"
-                            start_time = work_day.start_time
-                            if start_time:
-                                duration = get_moscow_now() - start_time
-                                work_duration = f"{duration.seconds // 3600:02d}:{(duration.seconds % 3600) // 60:02d}"
-                        elif work_day.status == WorkDayStatusEnum.FINISHED:
-                            print(f"  - Work day is finished (status)")
-                            status = "Рабочий день завершен"
-                            start_time = work_day.start_time
-                            if work_day.total_work_time:
-                                hours = work_day.total_work_time // 3600
-                                minutes = (work_day.total_work_time % 3600) // 60
-                                work_duration = f"{hours:02d}:{minutes:02d}"
-                    else:
-                        print(f"  - Work day has no start_time")
-                else:
-                    print(f"  - No work day found for employee")
-                    
-                    # Проверяем, есть ли активная задача
-                    stmt = select(Application).where(
-                        and_(
-                            Application.processed_by_id == emp.id,
-                            Application.status == ApplicationStatusEnum.IN_PROGRESS
-                        )
-                    )
-                    result = await session.execute(stmt)
-                    current_app = result.scalars().first()
-                    if current_app:
-                        current_task = f"Заявление {current_app.id} ({current_app.fio}) - {current_app.queue_type}"
-                
-                employee_statuses.append(EmployeeStatus(
-                    id=emp.id,
-                    fio=emp.fio or emp.tg_id,
-                    is_admin=emp.is_admin,
-                    status=status,
-                    current_task=current_task,
-                    start_time=start_time,
-                    work_duration=work_duration
-                ))
-            
-            return employee_statuses
+class DashboardService:
+    def __init__(self, db: Session):
+        self.db = db
+        self.moscow_tz = pytz.timezone('Europe/Moscow')
+        self.today = datetime.now(self.moscow_tz).date()
 
-class ApplicationService:
-    """Сервис для работы с заявлениями"""
-    
-    @staticmethod
-    async def get_recent_applications(limit: int = 10) -> List[ApplicationInfo]:
-        """Получение последних обработанных заявлений"""
-        async for session in get_session():
-            # Получаем последние обработанные заявления
-            stmt = select(Application).where(
-                Application.status.in_([
-                    ApplicationStatusEnum.ACCEPTED,
-                    ApplicationStatusEnum.REJECTED,
-                    ApplicationStatusEnum.PROBLEM
-                ])
-            ).options(selectinload(Application.processed_by)).order_by(
-                Application.processed_at.desc()
-            ).limit(limit)
-            
-            result = await session.execute(stmt)
-            applications = result.scalars().all()
-            
-            return [
-                ApplicationInfo(
-                    id=app.id,
-                    fio=app.fio,
-                    queue_type=app.queue_type,
-                    status=app.status.value,
-                    processed_by_fio=app.processed_by.fio if app.processed_by else None,
-                    submitted_at=app.submitted_at,
-                    processed_at=app.processed_at
+    def get_employees_status(self) -> List[dict]:
+        """Получить статус всех сотрудников"""
+        employees = self.db.query(Employee).all()
+        result = []
+        
+        print(f"DEBUG: Сегодняшняя дата: {self.today}")
+        
+        for employee in employees:
+            # Найти текущий рабочий день
+            work_day = self.db.query(WorkDay).filter(
+                and_(
+                    WorkDay.employee_id == employee.id,
+                    WorkDay.date == self.today
                 )
-                for app in applications
-            ]
+            ).first()
+            
+            print(f"DEBUG: Сотрудник {employee.fio} (ID: {employee.id})")
+            print(f"DEBUG: Рабочий день найден: {work_day is not None}")
+            
+            if work_day:
+                print(f"DEBUG: start_time: {work_day.start_time}")
+                print(f"DEBUG: end_time: {work_day.end_time}")
+                print(f"DEBUG: breaks: {work_day.breaks}")
+            
+            status = "Не работает"
+            current_task = None
+            work_duration = None
+            start_time = None
+            last_processed = None
+            
+            if work_day and work_day.start_time:
+                if not work_day.end_time:
+                    # Проверяем, есть ли активный перерыв
+                    active_break = None
+                    if work_day.breaks:
+                        active_break = next((b for b in work_day.breaks if b.start_time and not b.end_time), None)
+                    
+                    if active_break:
+                        status = "На перерыве"
+                        # Время перерыва
+                        break_time = datetime.now(self.moscow_tz) - active_break.start_time
+                        break_hours = int(break_time.total_seconds() // 3600)
+                        break_minutes = int((break_time.total_seconds() % 3600) // 60)
+                        work_duration = f"Перерыв: {break_hours:02d}:{break_minutes:02d}"
+                    else:
+                        status = "На рабочем месте"
+                        # Вычислить время работы
+                        work_time = datetime.now(self.moscow_tz) - work_day.start_time
+                        hours = int(work_time.total_seconds() // 3600)
+                        minutes = int((work_time.total_seconds() % 3600) // 60)
+                        work_duration = f"{hours:02d}:{minutes:02d}"
+                    
+                elif work_day.end_time:
+                    status = "Рабочий день завершен"
+                    # Время работы за день
+                    work_time = work_day.end_time - work_day.start_time
+                    hours = int(work_time.total_seconds() // 3600)
+                    minutes = int((work_time.total_seconds() % 3600) // 60)
+                    work_duration = f"{hours:02d}:{minutes:02d}"
+                    
+                start_time = work_day.start_time
+                
+                # Получить текущую задачу (последнее заявление в обработке)
+                current_application = self.db.query(Application).filter(
+                    and_(
+                        Application.processed_by_id == employee.id,
+                        Application.status == ApplicationStatusEnum.IN_PROGRESS
+                    )
+                ).order_by(Application.processed_at.desc()).first()
+                
+                if current_application:
+                    current_task = f"Заявление #{current_application.id} ({current_application.fio})"
+                
+                # Получить последнее обработанное заявление
+                last_processed_app = self.db.query(Application).filter(
+                    and_(
+                        Application.processed_by_id == employee.id,
+                        Application.status.in_([ApplicationStatusEnum.ACCEPTED, ApplicationStatusEnum.REJECTED, ApplicationStatusEnum.PROBLEM])
+                    )
+                ).order_by(Application.processed_at.desc()).first()
+                
+                if last_processed_app:
+                    last_processed = f"#{last_processed_app.id} ({last_processed_app.fio}) - {last_processed_app.status.value}"
+            
+            print(f"DEBUG: Итоговый статус: {status}")
+            
+            result.append({
+                "id": employee.id,
+                "fio": employee.fio,
+                "status": status,
+                "current_task": current_task,
+                "work_duration": work_duration,
+                "start_time": start_time,
+                "last_processed": last_processed,
+                "is_admin": employee.is_admin
+            })
+        
+        return result
 
-class QueueService:
-    """Сервис для работы с очередями"""
-    
-    @staticmethod
-    async def get_queue_statistics() -> List[QueueStatistics]:
-        """Получение статистики по очередям"""
-        async for session in get_session():
-            # Получаем статистику по очередям
-            queue_types = ['lk', 'epgu', 'epgu_mail', 'epgu_problem']
-            statistics = []
+    def get_recent_applications(self) -> List[dict]:
+        """Получить последние 10 обработанных заявлений"""
+        applications = self.db.query(Application).filter(
+            Application.status.in_([ApplicationStatusEnum.ACCEPTED, ApplicationStatusEnum.REJECTED, ApplicationStatusEnum.PROBLEM])
+        ).order_by(Application.processed_at.desc()).limit(10).all()
+        
+        result = []
+        for app in applications:
+            processed_by = None
+            if app.processed_by_id:
+                employee = self.db.query(Employee).filter(Employee.id == app.processed_by_id).first()
+                processed_by = employee.fio if employee else None
             
-            for queue_type in queue_types:
-                stmt = select(Application).where(Application.queue_type == queue_type)
-                result = await session.execute(stmt)
-                apps = result.scalars().all()
-                
-                total = len(apps)
-                queued = len([app for app in apps if app.status == ApplicationStatusEnum.QUEUED])
-                in_progress = len([app for app in apps if app.status == ApplicationStatusEnum.IN_PROGRESS])
-                accepted = len([app for app in apps if app.status == ApplicationStatusEnum.ACCEPTED])
-                rejected = len([app for app in apps if app.status == ApplicationStatusEnum.REJECTED])
-                problem = len([app for app in apps if app.status == ApplicationStatusEnum.PROBLEM])
-                
-                statistics.append(QueueStatistics(
-                    queue_type=queue_type,
-                    total=total,
-                    queued=queued,
-                    in_progress=in_progress,
-                    accepted=accepted,
-                    rejected=rejected,
-                    problem=problem
-                ))
+            result.append({
+                "id": app.id,
+                "fio": app.fio,
+                "queue_type": app.queue_type,
+                "status": app.status.value,
+                "submitted_at": app.submitted_at,
+                "processed_at": app.processed_at,
+                "processed_by_fio": processed_by
+            })
+        
+        return result
+
+    def get_queue_statistics(self) -> List[dict]:
+        """Получить статистику по всем очередям"""
+        queue_types = ['lk', 'lk_problem', 'epgu', 'epgu_mail', 'epgu_problem']
+        result = []
+        
+        for queue_type in queue_types:
+            # Общее количество
+            total = self.db.query(func.count(Application.id)).filter(
+                Application.queue_type == queue_type
+            ).scalar()
             
-            return statistics 
+            # В очереди
+            queued = self.db.query(func.count(Application.id)).filter(
+                and_(
+                    Application.queue_type == queue_type,
+                    Application.status == ApplicationStatusEnum.QUEUED
+                )
+            ).scalar()
+            
+            # В обработке
+            in_progress = self.db.query(func.count(Application.id)).filter(
+                and_(
+                    Application.queue_type == queue_type,
+                    Application.status == ApplicationStatusEnum.IN_PROGRESS
+                )
+            ).scalar()
+            
+            # Принято
+            accepted = self.db.query(func.count(Application.id)).filter(
+                and_(
+                    Application.queue_type == queue_type,
+                    Application.status == ApplicationStatusEnum.ACCEPTED
+                )
+            ).scalar()
+            
+            # Отклонено
+            rejected = self.db.query(func.count(Application.id)).filter(
+                and_(
+                    Application.queue_type == queue_type,
+                    Application.status == ApplicationStatusEnum.REJECTED
+                )
+            ).scalar()
+            
+            # Проблемные
+            problem = self.db.query(func.count(Application.id)).filter(
+                and_(
+                    Application.queue_type == queue_type,
+                    Application.status == ApplicationStatusEnum.PROBLEM
+                )
+            ).scalar()
+            
+            # Названия очередей для отображения
+            queue_names = {
+                'lk': 'Личный кабинет',
+                'lk_problem': 'ЛК - Проблемы',
+                'epgu': 'ЕПГУ',
+                'epgu_mail': 'ЕПГУ - Почта',
+                'epgu_problem': 'ЕПГУ - Проблемы'
+            }
+            
+            result.append({
+                "queue_type": queue_type,
+                "queue_name": queue_names.get(queue_type, queue_type),
+                "total": total,
+                "queued": queued,
+                "in_progress": in_progress,
+                "accepted": accepted,
+                "rejected": rejected,
+                "problem": problem
+            })
+        
+        return result
+
+    def get_queue_applications(self, queue_type: str) -> List[dict]:
+        """Получить все заявления из конкретной очереди"""
+        applications = self.db.query(Application).filter(
+            Application.queue_type == queue_type
+        ).order_by(Application.submitted_at.desc()).all()
+        
+        result = []
+        for app in applications:
+            processed_by = None
+            if app.processed_by_id:
+                employee = self.db.query(Employee).filter(Employee.id == app.processed_by_id).first()
+                processed_by = employee.fio if employee else None
+            
+            result.append({
+                "id": app.id,
+                "fio": app.fio,
+                "queue_type": app.queue_type,
+                "status": app.status.value,
+                "submitted_at": app.submitted_at,
+                "processed_at": app.processed_at,
+                "processed_by_fio": processed_by,
+                "is_priority": app.is_priority if hasattr(app, 'is_priority') else False
+            })
+        
+        return result
+
+    def get_lk_chart_data(self) -> dict:
+        """Получить данные для круговой диаграммы ЛК"""
+        # ЛК - в очереди
+        lk_queued = self.db.query(func.count(Application.id)).filter(
+            and_(
+                Application.queue_type.in_(['lk', 'lk_problem']),
+                Application.status == ApplicationStatusEnum.QUEUED
+            )
+        ).scalar()
+        
+        # ЛК - принято
+        lk_accepted = self.db.query(func.count(Application.id)).filter(
+            and_(
+                Application.queue_type.in_(['lk', 'lk_problem']),
+                Application.status == ApplicationStatusEnum.ACCEPTED
+            )
+        ).scalar()
+        
+        return {
+            "labels": ["В очереди", "Принято"],
+            "data": [lk_queued, lk_accepted],
+            "colors": ["#ffc107", "#28a745"]
+        }
+
+    def get_epgu_chart_data(self) -> dict:
+        """Получить данные для круговой диаграммы ЕПГУ"""
+        # ЕПГУ - в очереди
+        epgu_queued = self.db.query(func.count(Application.id)).filter(
+            and_(
+                Application.queue_type.in_(['epgu', 'epgu_mail', 'epgu_problem']),
+                Application.status == ApplicationStatusEnum.QUEUED
+            )
+        ).scalar()
+        
+        # ЕПГУ почта - всего
+        epgu_mail_total = self.db.query(func.count(Application.id)).filter(
+            Application.queue_type == 'epgu_mail'
+        ).scalar()
+        
+        # Сумма принято ЕПГУ и ЕПГУ почта
+        epgu_accepted = self.db.query(func.count(Application.id)).filter(
+            and_(
+                Application.queue_type.in_(['epgu', 'epgu_mail', 'epgu_problem']),
+                Application.status == ApplicationStatusEnum.ACCEPTED
+            )
+        ).scalar()
+        
+        return {
+            "labels": ["ЕПГУ в очереди", "ЕПГУ почта всего", "Сумма принято ЕПГУ"],
+            "data": [epgu_queued, epgu_mail_total, epgu_accepted],
+            "colors": ["#ffc107", "#6f42c1", "#28a745"]
+        } 

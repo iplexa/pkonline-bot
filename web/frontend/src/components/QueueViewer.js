@@ -1,0 +1,243 @@
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+
+const QueueViewer = () => {
+    const [selectedQueue, setSelectedQueue] = useState('lk');
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [applications, setApplications] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState('');
+
+    const queueTypes = [
+        { value: 'lk', name: 'Личный кабинет', icon: 'fas fa-user' },
+        { value: 'epgu', name: 'ЕПГУ', icon: 'fas fa-globe' },
+        { value: 'epgu_mail', name: 'Почта', icon: 'fas fa-envelope' },
+        { value: 'epgu_problem', name: 'Проблемные', icon: 'fas fa-exclamation-triangle' }
+    ];
+
+    const statusOptions = [
+        { value: 'all', name: 'Все', icon: 'fas fa-list' },
+        { value: 'queued', name: 'В очереди', icon: 'fas fa-clock' },
+        { value: 'in_progress', name: 'В обработке', icon: 'fas fa-spinner' },
+        { value: 'accepted', name: 'Принято', icon: 'fas fa-check' },
+        { value: 'rejected', name: 'Отклонено', icon: 'fas fa-times' },
+        { value: 'problem', name: 'Проблема', icon: 'fas fa-exclamation-triangle' }
+    ];
+
+    const fetchApplications = async () => {
+        try {
+            setLoading(true);
+            const response = await axios.get(`сд/dashboard/queues/${selectedQueue}/applications`);
+            setApplications(response.data);
+        } catch (error) {
+            console.error('Ошибка загрузки заявлений:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchApplications();
+        const interval = setInterval(fetchApplications, 30000);
+        return () => clearInterval(interval);
+    }, [selectedQueue]);
+
+    const getStatusBadge = (status) => {
+        const statusConfig = {
+            'queued': { bg: 'warning', text: 'В очереди', icon: 'fas fa-clock' },
+            'in_progress': { bg: 'info', text: 'В обработке', icon: 'fas fa-spinner' },
+            'accepted': { bg: 'success', text: 'Принято', icon: 'fas fa-check' },
+            'rejected': { bg: 'danger', text: 'Отклонено', icon: 'fas fa-times' },
+            'problem': { bg: 'secondary', text: 'Проблема', icon: 'fas fa-exclamation-triangle' }
+        };
+        
+        const config = statusConfig[status] || { bg: 'secondary', text: status, icon: 'fas fa-question' };
+        
+        return (
+            <span className={`badge bg-${config.bg}`}>
+                <i className={`${config.icon} me-1`}></i>
+                {config.text}
+            </span>
+        );
+    };
+
+    const getPriorityBadge = (isPriority) => {
+        if (isPriority) {
+            return <span className="badge bg-danger me-2"><i className="fas fa-star me-1"></i>Приоритет</span>;
+        }
+        return null;
+    };
+
+    const filteredApplications = applications.filter(app => {
+        const matchesStatus = statusFilter === 'all' || app.status === statusFilter;
+        const matchesSearch = searchTerm === '' || 
+            app.fio.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            app.id.toString().includes(searchTerm);
+        return matchesStatus && matchesSearch;
+    });
+
+    return (
+        <div className="queue-viewer">
+            {/* Queue Selection */}
+            <div className="card border-0 shadow-sm mb-4">
+                <div className="card-header bg-primary text-white">
+                    <h5 className="card-title mb-0">
+                        <i className="fas fa-list-alt me-2"></i>
+                        Просмотр очередей
+                    </h5>
+                </div>
+                <div className="card-body">
+                    <div className="row g-3">
+                        <div className="col-md-6">
+                            <label className="form-label fw-semibold">Выберите очередь:</label>
+                            <div className="btn-group w-100" role="group">
+                                {queueTypes.map((queue) => (
+                                    <button
+                                        key={queue.value}
+                                        type="button"
+                                        className={`btn ${selectedQueue === queue.value ? 'btn-primary' : 'btn-outline-primary'}`}
+                                        onClick={() => setSelectedQueue(queue.value)}
+                                    >
+                                        <i className={`${queue.icon} me-1`}></i>
+                                        {queue.name}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="col-md-6">
+                            <label className="form-label fw-semibold">Фильтр по статусу:</label>
+                            <select 
+                                className="form-select"
+                                value={statusFilter}
+                                onChange={(e) => setStatusFilter(e.target.value)}
+                            >
+                                {statusOptions.map((status) => (
+                                    <option key={status.value} value={status.value}>
+                                        {status.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div className="row mt-3">
+                        <div className="col-md-6">
+                            <label className="form-label fw-semibold">Поиск:</label>
+                            <div className="input-group">
+                                <span className="input-group-text">
+                                    <i className="fas fa-search"></i>
+                                </span>
+                                <input
+                                    type="text"
+                                    className="form-control"
+                                    placeholder="Поиск по ФИО или ID..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                            </div>
+                        </div>
+                        <div className="col-md-6 d-flex align-items-end">
+                            <button 
+                                className="btn btn-outline-primary"
+                                onClick={fetchApplications}
+                                disabled={loading}
+                            >
+                                <i className={`fas fa-sync-alt ${loading ? 'fa-spin' : ''}`}></i>
+                                Обновить
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Applications List */}
+            <div className="card border-0 shadow-sm">
+                <div className="card-header bg-light">
+                    <div className="d-flex justify-content-between align-items-center">
+                        <h6 className="mb-0">
+                            Заявления в очереди: {filteredApplications.length}
+                        </h6>
+                        <small className="text-muted">
+                            Всего в очереди: {applications.length}
+                        </small>
+                    </div>
+                </div>
+                <div className="card-body p-0">
+                    {loading ? (
+                        <div className="p-4 text-center">
+                            <div className="spinner-border text-primary" role="status">
+                                <span className="visually-hidden">Загрузка...</span>
+                            </div>
+                        </div>
+                    ) : filteredApplications.length === 0 ? (
+                        <div className="p-4 text-center text-muted">
+                            <i className="fas fa-inbox fa-3x mb-3"></i>
+                            <p>Нет заявлений в выбранной очереди</p>
+                        </div>
+                    ) : (
+                        <div className="table-responsive">
+                            <table className="table table-hover mb-0">
+                                <thead className="table-light">
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>ФИО</th>
+                                        <th>Статус</th>
+                                        <th>Обработал</th>
+                                        <th>Дата подачи</th>
+                                        <th>Действия</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filteredApplications.map((app) => (
+                                        <tr key={app.id}>
+                                            <td>
+                                                <span className="fw-bold text-primary">#{app.id}</span>
+                                                {getPriorityBadge(app.is_priority)}
+                                            </td>
+                                            <td>
+                                                <div className="fw-semibold">{app.fio}</div>
+                                                <small className="text-muted">
+                                                    Очередь: {queueTypes.find(q => q.value === app.queue_type)?.name}
+                                                </small>
+                                            </td>
+                                            <td>
+                                                {getStatusBadge(app.status)}
+                                            </td>
+                                            <td>
+                                                {app.processed_by_fio ? (
+                                                    <span className="fw-medium">{app.processed_by_fio}</span>
+                                                ) : (
+                                                    <span className="text-muted">—</span>
+                                                )}
+                                            </td>
+                                            <td>
+                                                <div>
+                                                    <div className="fw-medium">
+                                                        {new Date(app.submitted_at).toLocaleDateString('ru-RU')}
+                                                    </div>
+                                                    <small className="text-muted">
+                                                        {new Date(app.submitted_at).toLocaleTimeString('ru-RU')}
+                                                    </small>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <button 
+                                                    className="btn btn-sm btn-outline-info"
+                                                    title="Подробности"
+                                                >
+                                                    <i className="fas fa-eye"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default QueueViewer; 

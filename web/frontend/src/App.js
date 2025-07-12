@@ -1,34 +1,34 @@
-import React, { useState, useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { Container } from 'react-bootstrap';
+import React from 'react';
+import { AuthProvider } from './contexts/AuthContext';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
 import './App.css';
-
-function AppContent() {
-  const { isAuthenticated } = useAuth();
-
-  if (!isAuthenticated) {
-    return <Login />;
-  }
-
-  return (
-    <Container fluid className="p-0">
-      <Routes>
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-    </Container>
-  );
-}
+import { useAuth } from './contexts/AuthContext';
 
 function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <div className="App">
+        <AppContent />
+      </div>
     </AuthProvider>
   );
+}
+
+function AppContent() {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="d-flex justify-content-center align-items-center" style={{ height: '100vh' }}>
+        <div className="spinner-border text-primary" role="status">
+          <span className="visually-hidden">Загрузка...</span>
+        </div>
+      </div>
+    );
+  }
+
+  return isAuthenticated ? <Dashboard /> : <Login />;
 }
 
 export default App; 

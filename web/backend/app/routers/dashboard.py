@@ -16,6 +16,16 @@ def get_employees_status(
     service = DashboardService(db)
     return service.get_employees_status()
 
+@router.post("/employees/status/refresh")
+def refresh_employees_status(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Принудительно обновить статус сотрудников (очистить кэш)"""
+    service = DashboardService(db)
+    service.clear_cache()
+    return {"message": "Кэш очищен, данные будут обновлены при следующем запросе"}
+
 @router.get("/applications/recent")
 def get_recent_applications(
     db: Session = Depends(get_db),

@@ -1,13 +1,37 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from db.crud import get_employee_by_tg_id, start_work_day, end_work_day, start_break, end_break, get_current_work_day, get_work_day_report, get_moscow_now, get_active_break
 from keyboards.main import main_menu_keyboard
 from keyboards.work_time import work_time_keyboard, work_status_keyboard
 from datetime import datetime
 from utils.logger import get_logger
+import asyncio
+import aiohttp
+import pytz
 
 router = Router()
+
+def get_moscow_now():
+    """Получить текущее время в московском времени"""
+    moscow_tz = pytz.timezone('Europe/Moscow')
+    return datetime.now(moscow_tz).replace(tzinfo=None)
+
+async def clear_web_cache():
+    """Очистить кэш веб-интерфейса"""
+    try:
+        # Асинхронно очищаем кэш веб-интерфейса
+        async with aiohttp.ClientSession() as session:
+            # Получаем токен из переменной окружения или конфигурации
+            # Для простоты используем базовую аутентификацию или пропускаем
+            async with session.post('http://localhost:8000/dashboard/employees/status/refresh') as response:
+                if response.status == 200:
+                    print("Web cache cleared successfully")
+                else:
+                    print(f"Failed to clear web cache: {response.status}")
+    except Exception as e:
+        print(f"Error clearing web cache: {e}")
 
 @router.message(Command("start"))
 @router.message(Command("help"))
@@ -103,6 +127,9 @@ async def start_work_day_handler(callback: CallbackQuery):
         telegram_logger = get_logger()
         if telegram_logger:
             await telegram_logger.log_work_time_start(emp.fio, work_day.start_time.strftime('%H:%M'))
+        
+        # Очищаем кэш веб-интерфейса
+        await clear_web_cache()
         
         await callback.message.edit_text(
             f"✅ Рабочий день начат в {work_day.start_time.strftime('%H:%M')}",
@@ -211,6 +238,9 @@ async def end_work_day_handler(callback: CallbackQuery):
         if telegram_logger:
             await telegram_logger.log_work_time_end(emp.fio, work_day.end_time.strftime('%H:%M'), work_time_str)
         
+        # Очищаем кэш веб-интерфейса
+        await clear_web_cache()
+        
         await callback.message.edit_text(message_text, reply_markup=work_time_keyboard())
     else:
         await callback.answer("Рабочий день не найден!", show_alert=True)
@@ -254,6 +284,9 @@ async def start_break_handler(callback: CallbackQuery):
         if telegram_logger:
             await telegram_logger.log_break_start(emp.fio, work_break.start_time.strftime('%H:%M'))
         
+        # Очищаем кэш веб-интерфейса
+        await clear_web_cache()
+        
         await callback.message.edit_text(message_text, reply_markup=work_status_keyboard(display_status))
     else:
         await callback.answer("Не удалось начать перерыв!", show_alert=True)
@@ -287,6 +320,9 @@ async def end_break_handler(callback: CallbackQuery):
                     total_work_seconds = elapsed_seconds - total_break_seconds
             work_time_str = f"{total_work_seconds // 3600:02d}:{(total_work_seconds % 3600) // 60:02d}"
             break_time_str = f"{total_break_seconds // 3600:02d}:{(total_break_seconds % 3600) // 60:02d}"
+            
+            # Очищаем кэш веб-интерфейса
+            await clear_web_cache()
             message_text = f"🟢 Рабочий день активен\n\n"
             message_text += f"Начало: {current_work_day.start_time.strftime('%H:%M')}\n"
             message_text += f"Время работы: {work_time_str}\n"

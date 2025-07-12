@@ -845,6 +845,60 @@ async def get_applications_by_fio_and_queue(fio: str, queue_type: str):
         result = await session.execute(stmt)
         return result.scalars().all()
 
+async def get_queue_statistics(queue_type: str):
+    """Получить статистику по очереди"""
+    async for session in get_session():
+        from sqlalchemy import func
+        
+        # Подсчитываем заявления по статусам
+        queued_count = await session.execute(
+            select(func.count(Application.id)).where(
+                Application.queue_type == queue_type,
+                Application.status == ApplicationStatusEnum.QUEUED
+            )
+        )
+        queued_count = queued_count.scalar()
+        
+        in_progress_count = await session.execute(
+            select(func.count(Application.id)).where(
+                Application.queue_type == queue_type,
+                Application.status == ApplicationStatusEnum.IN_PROGRESS
+            )
+        )
+        in_progress_count = in_progress_count.scalar()
+        
+        accepted_count = await session.execute(
+            select(func.count(Application.id)).where(
+                Application.queue_type == queue_type,
+                Application.status == ApplicationStatusEnum.ACCEPTED
+            )
+        )
+        accepted_count = accepted_count.scalar()
+        
+        rejected_count = await session.execute(
+            select(func.count(Application.id)).where(
+                Application.queue_type == queue_type,
+                Application.status == ApplicationStatusEnum.REJECTED
+            )
+        )
+        rejected_count = rejected_count.scalar()
+        
+        problem_count = await session.execute(
+            select(func.count(Application.id)).where(
+                Application.queue_type == queue_type,
+                Application.status == ApplicationStatusEnum.PROBLEM
+            )
+        )
+        problem_count = problem_count.scalar()
+        
+        return {
+            'queued': queued_count,
+            'in_progress': in_progress_count,
+            'accepted': accepted_count,
+            'rejected': rejected_count,
+            'problem': problem_count
+        }
+
 async def get_problem_applications(queue_type: str):
     async for session in get_session():
         stmt = select(Application).where(

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import pytz
 from db.models import Employee, Application, WorkDay, ApplicationStatusEnum, WorkDayStatusEnum
 from typing import List, Dict, Any
+import time
 
 def get_moscow_date():
     """Получить текущую дату в московском времени"""
@@ -22,9 +23,27 @@ class DashboardService:
         self.db = db
         self.moscow_tz = pytz.timezone('Europe/Moscow')
         self.today = datetime.now(self.moscow_tz).date()
+        # Кэш для данных сотрудников (5 секунд)
+        self._employees_cache = None
+        self._employees_cache_time = 0
+        self._cache_duration = 5
+
+    def _is_cache_valid(self):
+        """Проверить, действителен ли кэш"""
+        return (self._employees_cache is not None and 
+                time.time() - self._employees_cache_time < self._cache_duration)
+
+    def clear_cache(self):
+        """Очистить кэш"""
+        self._employees_cache = None
+        self._employees_cache_time = 0
 
     def get_employees_status(self) -> List[Dict[str, Any]]:
         """Получить статус всех сотрудников"""
+        # Проверяем кэш
+        if self._is_cache_valid():
+            return self._employees_cache
+        
         employees = self.db.query(Employee).all()
         result = []
         
@@ -164,6 +183,10 @@ class DashboardService:
                 "start_time": start_time,
                 "work_duration": work_duration
             })
+        
+        # Сохраняем в кэш
+        self._employees_cache = result
+        self._employees_cache_time = time.time()
         
         return result
 

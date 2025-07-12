@@ -16,10 +16,11 @@ from db.crud import (
     get_application_by_id,
     get_applications_by_fio_and_queue,
     escalate_application,
-    get_moscow_now
+    get_moscow_now,
+    get_queue_statistics
 )
 from db.models import ApplicationStatusEnum, EPGUActionEnum
-from keyboards.epgu import epgu_queue_keyboard, epgu_decision_keyboard, epgu_reason_keyboard, epgu_escalate_keyboard
+from keyboards.epgu import epgu_queue_keyboard, epgu_decision_keyboard, epgu_reason_keyboard, epgu_escalate_keyboard, epgu_search_results_keyboard
 from keyboards.main import main_menu_keyboard
 from config import ADMIN_CHAT_ID
 from utils.logger import get_logger
@@ -40,7 +41,27 @@ async def epgu_menu_entry(callback: CallbackQuery, state: FSMContext):
         emp = await get_employee_by_tg_id(str(callback.from_user.id))
         if not emp or not await has_access(str(callback.from_user.id), "epgu"):
             return
-        await callback.message.edit_text("Очередь ЕПГУ. Нажмите кнопку, чтобы получить заявление.", reply_markup=epgu_decision_keyboard(menu=True))
+        
+        # Получаем статистику по очереди ЕПГУ
+        stats = await get_queue_statistics("epgu")
+        
+        text = "🏛️ <b>Очередь ЕПГУ</b>\n\n"
+        
+        if stats:
+            text += f"📊 <b>Статистика:</b>\n"
+            text += f"⏳ В очереди: <b>{stats.get('queued', 0)}</b>\n"
+            text += f"🔄 В обработке: <b>{stats.get('in_progress', 0)}</b>\n"
+            text += f"✅ Принято: <b>{stats.get('accepted', 0)}</b>\n"
+            text += f"❌ Отклонено: <b>{stats.get('rejected', 0)}</b>\n"
+            text += f"⚠️ Проблемные: <b>{stats.get('problem', 0)}</b>\n\n"
+        
+        text += "Выберите действие:"
+        
+        await callback.message.edit_text(
+            text, 
+            reply_markup=epgu_decision_keyboard(menu=True),
+            parse_mode="HTML"
+        )
     except Exception as e:
         await callback.message.answer(f"Ошибка: {e}")
         import traceback
@@ -227,21 +248,45 @@ async def block_menu_exit_during_processing(callback: CallbackQuery, state: FSMC
 
 @router.callback_query(F.data == "epgu_search_fio")
 async def epgu_search_fio_start(callback: CallbackQuery, state: FSMContext):
+    emp = await get_employee_by_tg_id(str(callback.from_user.id))
+    if not emp or not await has_access(str(callback.from_user.id), "epgu"):
+        return
+    
     await state.set_state(EPGUStates.waiting_search_fio)
-    await callback.message.edit_text("Введите ФИО для поиска заявлений:", reply_markup=epgu_decision_keyboard(menu=True))
+    await callback.message.edit_text(
+        "🔍 <b>Поиск заявлений ЕПГУ</b>\n\n"
+        "Введите ФИО для поиска заявлений.\n"
+        "Можно ввести часть имени или фамилии.\n\n"
+        "<i>Примеры: Иванов, Иван, Иванов И.И.</i>",
+        reply_markup=epgu_decision_keyboard(menu=True),
+        parse_mode="HTML"
+    )
 
 @router.message(EPGUStates.waiting_search_fio)
 async def epgu_search_fio_process(message: Message, state: FSMContext):
     emp = await get_employee_by_tg_id(str(message.from_user.id))
     if not emp or not await has_access(str(message.from_user.id), "epgu"):
         return
+    
     fio = message.text.strip()
     if not fio:
-        await message.answer("Пожалуйста, введите ФИО.", reply_markup=epgu_decision_keyboard(menu=True))
+        await message.answer(
+            "❌ Пожалуйста, введите ФИО для поиска.",
+            reply_markup=epgu_decision_keyboard(menu=True)
+        )
         return
+    
+    # Поиск заявлений
     apps = await get_applications_by_fio_and_queue(fio, "epgu")
+    
     if not apps:
-        await message.answer(f"Заявления для '{fio}' не найдены.", reply_markup=epgu_decision_keyboard(menu=True))
+        await message.answer(
+            f"🔍 <b>Поиск завершен</b>\n\n"
+            f"По запросу '<code>{fio}</code>' заявлений не найдено.\n\n"
+            f"<i>Попробуйте изменить запрос или проверить правильность написания.</i>",
+            reply_markup=epgu_search_results_keyboard(fio, 0),
+            parse_mode="HTML"
+        )
         await state.clear()
         return
     
@@ -254,37 +299,164 @@ async def epgu_search_fio_process(message: Message, state: FSMContext):
         'problem': '⚠️'
     }
     
-    for app in apps:
-        text = f"🏛️ <b>Заявление ЕПГУ #{app.id}</b>\n\n"
+    # Статус текст
+    status_text = {
+        'queued': 'В очереди',
+        'in_progress': 'В обработке',
+        'accepted': 'Принято',
+        'rejected': 'Отклонено',
+        'problem': 'Проблемное'
+    }
+    
+    # Сортируем заявления: сначала в очереди, потом по дате
+    queued_apps = [app for app in apps if app.status.value == 'queued']
+    other_apps = [app for app in apps if app.status.value != 'queued']
+    
+    # Сортируем по дате подачи (новые сначала)
+    queued_apps.sort(key=lambda x: x.submitted_at, reverse=True)
+    other_apps.sort(key=lambda x: x.submitted_at, reverse=True)
+    
+    sorted_apps = queued_apps + other_apps
+    
+    # Отправляем сводку результатов
+    summary_text = f"🔍 <b>Результаты поиска</b>\n\n"
+    summary_text += f"По запросу '<code>{fio}</code>' найдено <b>{len(apps)}</b> заявлений:\n\n"
+    
+    queued_count = len(queued_apps)
+    in_progress_count = len([app for app in apps if app.status.value == 'in_progress'])
+    completed_count = len([app for app in apps if app.status.value in ['accepted', 'rejected']])
+    problem_count = len([app for app in apps if app.status.value == 'problem'])
+    
+    if queued_count > 0:
+        summary_text += f"⏳ В очереди: <b>{queued_count}</b>\n"
+    if in_progress_count > 0:
+        summary_text += f"🔄 В обработке: <b>{in_progress_count}</b>\n"
+    if completed_count > 0:
+        summary_text += f"✅ Завершено: <b>{completed_count}</b>\n"
+    if problem_count > 0:
+        summary_text += f"⚠️ Проблемные: <b>{problem_count}</b>\n"
+    
+    await message.answer(
+        summary_text,
+        reply_markup=epgu_search_results_keyboard(fio, len(apps)),
+        parse_mode="HTML"
+    )
+    
+    # Отправляем детальную информацию по каждому заявлению
+    for i, app in enumerate(sorted_apps, 1):
+        text = f"🏛️ <b>Заявление ЕПГУ #{app.id}</b> ({i}/{len(sorted_apps)})\n\n"
         text += f"👨‍💼 <b>ФИО:</b> {app.fio}\n"
         text += f"📅 <b>Дата подачи:</b> {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
-        text += f"📊 <b>Статус:</b> {status_emoji.get(app.status.value, '❓')} {app.status.value}\n"
+        text += f"📊 <b>Статус:</b> {status_emoji.get(app.status.value, '❓')} {status_text.get(app.status.value, app.status.value)}\n"
+        
         if app.is_priority:
             text += "🚨 <b>ПРИОРИТЕТНОЕ</b>\n"
+        
         if app.status_reason:
             text += f"💬 <b>Причина:</b> {app.status_reason}\n"
-        text += f"🔍 <b>Поисковый запрос:</b> '{fio}'\n"
         
-        await message.answer(text, reply_markup=epgu_escalate_keyboard(app.id, app.is_priority, app.status.value), parse_mode="HTML")
+        if app.processed_by:
+            text += f"👤 <b>Обработал:</b> {app.processed_by.fio}\n"
+        
+        if app.processed_at:
+            text += f"⏰ <b>Время обработки:</b> {app.processed_at.strftime('%d.%m.%Y %H:%M')}\n"
+        
+        text += f"\n🔍 <b>Поисковый запрос:</b> '<code>{fio}</code>'"
+        
+        await message.answer(
+            text, 
+            reply_markup=epgu_escalate_keyboard(app.id, app.is_priority, app.status.value), 
+            parse_mode="HTML"
+        )
+    
     await state.clear()
+
+@router.callback_query(F.data == "epgu_search_info")
+async def epgu_search_info_handler(callback: CallbackQuery):
+    """Показать информацию о поиске"""
+    await callback.answer(
+        "ℹ️ Информация о поиске\n\n"
+        "• Поиск выполняется по частичному совпадению ФИО\n"
+        "• Заявления сортируются: сначала в очереди, потом по дате\n"
+        "• Можно обрабатывать только заявления в статусе 'В очереди'\n"
+        "• Эскалировать можно только не приоритетные заявления",
+        show_alert=True
+    )
 
 @router.callback_query(F.data.startswith("epgu_escalate_"))
 async def epgu_escalate_handler(callback: CallbackQuery):
     emp = await get_employee_by_tg_id(str(callback.from_user.id))
     if not emp or not await has_access(str(callback.from_user.id), "epgu"):
         return
+    
     app_id = int(callback.data.replace("epgu_escalate_", ""))
+    app = await get_application_by_id(app_id)
+    
+    if not app:
+        await callback.message.edit_text(
+            "❌ Заявление не найдено.",
+            reply_markup=epgu_decision_keyboard(menu=True)
+        )
+        return
+    
+    # Проверяем, что заявление в очереди ЕПГУ
+    if app.queue_type != "epgu":
+        await callback.message.edit_text(
+            "❌ Это заявление не в очереди ЕПГУ.",
+            reply_markup=epgu_decision_keyboard(menu=True)
+        )
+        return
+    
+    # Проверяем, что заявление в очереди (не в обработке)
+    if app.status != ApplicationStatusEnum.QUEUED:
+        await callback.message.edit_text(
+            "❌ Это заявление уже обрабатывается или обработано.",
+            reply_markup=epgu_decision_keyboard(menu=True)
+        )
+        return
+    
+    # Проверяем, что заявление не приоритетное
+    if app.is_priority:
+        await callback.message.edit_text(
+            "❌ Приоритетные заявления нельзя эскалировать.",
+            reply_markup=epgu_decision_keyboard(menu=True)
+        )
+        return
+    
+    # Выполняем эскалацию
     success = await escalate_application(app_id)
+    
     if success:
-        from db.crud import get_application_by_id
-        app = await get_application_by_id(app_id)
         # Логирование
-        logger = get_logger()
-        if logger and app:
-            await logger.log_escalation(app.id, app.queue_type, emp.fio, reason="Эскалация через поиск по ФИО")
-        await callback.message.edit_text(f"✅ Заявление {app_id} эскалировано (приоритетное)", reply_markup=epgu_decision_keyboard(menu=True))
+        telegram_logger = get_logger()
+        if telegram_logger:
+            await telegram_logger.log_escalation(app.id, app.queue_type, emp.fio, reason="Эскалация через поиск по ФИО")
+        
+        # Обновляем сообщение с информацией об эскалации
+        text = f"🚨 <b>Заявление эскалировано</b>\n\n"
+        text += f"🆔 <b>ID:</b> {app.id}\n"
+        text += f"👨‍💼 <b>ФИО:</b> {app.fio}\n"
+        text += f"📅 <b>Дата подачи:</b> {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
+        text += f"👤 <b>Эскалировал:</b> {emp.fio}\n"
+        text += f"⏰ <b>Время эскалации:</b> {get_moscow_now().strftime('%d.%m.%Y %H:%M')}\n\n"
+        text += f"✅ Заявление теперь имеет приоритетный статус и будет обработано в первую очередь."
+        
+        await callback.message.edit_text(
+            text,
+            reply_markup=epgu_decision_keyboard(menu=True),
+            parse_mode="HTML"
+        )
+        
+        # Уведомляем админов
+        await callback.bot.send_message(
+            ADMIN_CHAT_ID, 
+            f"🚨 ЕПГУ: {callback.from_user.full_name} эскалировал заявление {app_id} ({app.fio})"
+        )
     else:
-        await callback.message.edit_text("❌ Не удалось эскалировать заявление.", reply_markup=epgu_decision_keyboard(menu=True))
+        await callback.message.edit_text(
+            "❌ Не удалось эскалировать заявление. Попробуйте еще раз.",
+            reply_markup=epgu_decision_keyboard(menu=True)
+        )
 
 @router.callback_query(F.data.startswith("epgu_process_found_"))
 async def epgu_process_found_application(callback: CallbackQuery, state: FSMContext):
@@ -296,17 +468,26 @@ async def epgu_process_found_application(callback: CallbackQuery, state: FSMCont
     app = await get_application_by_id(app_id)
     
     if not app:
-        await callback.message.edit_text("Заявление не найдено.", reply_markup=epgu_decision_keyboard(menu=True))
+        await callback.message.edit_text(
+            "❌ Заявление не найдено.",
+            reply_markup=epgu_decision_keyboard(menu=True)
+        )
         return
     
     # Проверяем, что заявление в очереди ЕПГУ
     if app.queue_type != "epgu":
-        await callback.message.edit_text("Это заявление не в очереди ЕПГУ.", reply_markup=epgu_decision_keyboard(menu=True))
+        await callback.message.edit_text(
+            "❌ Это заявление не в очереди ЕПГУ.",
+            reply_markup=epgu_decision_keyboard(menu=True)
+        )
         return
     
     # Проверяем, что заявление в очереди (не в обработке)
     if app.status != ApplicationStatusEnum.QUEUED:
-        await callback.message.edit_text("Это заявление уже обрабатывается или обработано.", reply_markup=epgu_decision_keyboard(menu=True))
+        await callback.message.edit_text(
+            "❌ Это заявление уже обрабатывается или обработано.",
+            reply_markup=epgu_decision_keyboard(menu=True)
+        )
         return
     
     # Берем заявление в обработку
@@ -317,13 +498,24 @@ async def epgu_process_found_application(callback: CallbackQuery, state: FSMCont
     await state.update_data(app_id=app_id)
     
     # Показываем информацию о заявлении и кнопки для принятия решения
-    text = f"🏛️ <b>Обработка заявления ЕПГУ</b>\n\n"
+    text = f"🔄 <b>Обработка заявления ЕПГУ</b>\n\n"
     text += f"🆔 <b>ID:</b> {app.id}\n"
     text += f"👨‍💼 <b>ФИО:</b> {app.fio}\n"
     text += f"📅 <b>Дата подачи:</b> {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
+    text += f"👤 <b>Обрабатывает:</b> {emp.fio}\n"
+    text += f"⏰ <b>Взято в обработку:</b> {get_moscow_now().strftime('%d.%m.%Y %H:%M')}\n"
+    
     if app.is_priority:
         text += "🚨 <b>ПРИОРИТЕТНОЕ</b>\n"
-    text += f"💬 <b>Причина:</b> {app.status_reason or '-'}\n"
     
-    await callback.message.edit_text(text, reply_markup=epgu_decision_keyboard(menu=False), parse_mode="HTML")
+    if app.status_reason:
+        text += f"💬 <b>Причина:</b> {app.status_reason}\n"
+    
+    text += f"\n<b>Выберите действие:</b>"
+    
+    await callback.message.edit_text(
+        text, 
+        reply_markup=epgu_decision_keyboard(menu=False), 
+        parse_mode="HTML"
+    )
     await state.set_state(EPGUStates.waiting_decision) 

@@ -3,7 +3,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 def epgu_queue_keyboard(menu=False):
     buttons = [
         [InlineKeyboardButton(text="Следующее заявление", callback_data="epgu_next")],
-        [InlineKeyboardButton(text="Поиск по ФИО", callback_data="epgu_search_fio")],
+        [InlineKeyboardButton(text="🔍 Поиск по ФИО", callback_data="epgu_search_fio")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
     ]
     if menu:
@@ -15,7 +15,7 @@ def epgu_decision_keyboard(menu: bool = True) -> InlineKeyboardMarkup:
     if menu:
         return InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Получить заявление", callback_data="epgu_next")],
-            [InlineKeyboardButton(text="Поиск по ФИО", callback_data="epgu_search_fio")],
+            [InlineKeyboardButton(text="🔍 Поиск по ФИО", callback_data="epgu_search_fio")],
             [InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]
         ])
     else:
@@ -35,13 +35,37 @@ def epgu_reason_keyboard() -> InlineKeyboardMarkup:
     ])
 
 def epgu_escalate_keyboard(app_id: int, is_priority: bool, status: str = "queued"):
+    """Улучшенная клавиатура для найденных заявлений"""
     buttons = []
+    
     # Кнопка обработки заявления (только если в очереди)
     if status == "queued":
         buttons.append([InlineKeyboardButton(text="🔄 Обработать заявление", callback_data=f"epgu_process_found_{app_id}")])
-    # Кнопка эскалации (только если не приоритетное)
-    if not is_priority:
+    
+    # Кнопка эскалации (только если не приоритетное и в очереди)
+    if not is_priority and status == "queued":
         buttons.append([InlineKeyboardButton(text="🚨 Эскалировать", callback_data=f"epgu_escalate_{app_id}")])
-    buttons.append([InlineKeyboardButton(text="🔍 Найти еще", callback_data="epgu_search_fio")])
+    
+    # Навигационные кнопки
+    buttons.append([
+        InlineKeyboardButton(text="🔍 Найти еще", callback_data="epgu_search_fio"),
+        InlineKeyboardButton(text="📋 Следующее", callback_data="epgu_next")
+    ])
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="epgu_menu")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def epgu_search_results_keyboard(fio: str, total_found: int):
+    """Клавиатура для результатов поиска"""
+    buttons = []
+    
+    if total_found > 0:
+        buttons.append([InlineKeyboardButton(text=f"📊 Найдено: {total_found} заявлений", callback_data="epgu_search_info")])
+    
+    buttons.append([
+        InlineKeyboardButton(text="🔍 Новый поиск", callback_data="epgu_search_fio"),
+        InlineKeyboardButton(text="📋 Следующее", callback_data="epgu_next")
+    ])
+    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="epgu_menu")])
+    
     return InlineKeyboardMarkup(inline_keyboard=buttons) 

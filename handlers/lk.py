@@ -224,8 +224,13 @@ async def lk_search_fio_process(message: Message, state: FSMContext):
         if app.status_reason:
             text += f"💬 <b>Причина:</b> {app.status_reason}\n"
         
+        # Получаем информацию о сотруднике заранее
+        processed_by_fio = None
         if app.processed_by:
-            text += f"👤 <b>Обработал:</b> {app.processed_by.fio}\n"
+            processed_by_fio = app.processed_by.fio
+        
+        if processed_by_fio:
+            text += f"👤 <b>Обработал:</b> {processed_by_fio}\n"
         
         if app.processed_at:
             text += f"⏰ <b>Время обработки:</b> {app.processed_at.strftime('%d.%m.%Y %H:%M')}\n"
@@ -290,15 +295,16 @@ async def lk_process_found_application(callback: CallbackQuery, state: FSMContex
         )
         return
     
-    # Если заявление уже в обработке, проверяем, не обрабатывает ли его кто-то другой
-    if app.status == ApplicationStatusEnum.IN_PROGRESS and app.processed_by_id and app.processed_by_id != emp.id:
-        # Заявление уже обрабатывается другим сотрудником
-        await callback.message.edit_text(
-            f"❌ Это заявление уже обрабатывается сотрудником {app.processed_by.fio}.\n\n"
-            f"Вы можете эскалировать заявление или дождаться завершения обработки.",
-            reply_markup=lk_decision_keyboard(menu=True)
-        )
-        return
+            # Если заявление уже в обработке, проверяем, не обрабатывает ли его кто-то другой
+        if app.status == ApplicationStatusEnum.IN_PROGRESS and app.processed_by_id and app.processed_by_id != emp.id:
+            # Заявление уже обрабатывается другим сотрудником
+            processed_by_fio = app.processed_by.fio if app.processed_by else "неизвестно"
+            await callback.message.edit_text(
+                f"❌ Это заявление уже обрабатывается сотрудником {processed_by_fio}.\n\n"
+                f"Вы можете эскалировать заявление или дождаться завершения обработки.",
+                reply_markup=lk_decision_keyboard(menu=True)
+            )
+            return
     
     # Берем заявление в обработку (если оно еще не в обработке)
     if app.status == ApplicationStatusEnum.QUEUED:

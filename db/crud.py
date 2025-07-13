@@ -844,7 +844,37 @@ async def get_applications_by_fio_and_queue(fio: str, queue_type: str):
             Application.queue_type == queue_type
         ).options(selectinload(Application.processed_by)).order_by(Application.is_priority.desc(), Application.submitted_at.asc())
         result = await session.execute(stmt)
-        return result.scalars().all()
+        apps = result.scalars().all()
+        
+        # Преобразуем в словари, чтобы избежать проблем с отключенными объектами
+        apps_data = []
+        for app in apps:
+            app_data = {
+                'id': app.id,
+                'fio': app.fio,
+                'submitted_at': app.submitted_at,
+                'is_priority': app.is_priority,
+                'status': app.status,
+                'status_reason': app.status_reason,
+                'queue_type': app.queue_type,
+                'processed_by_id': app.processed_by_id,
+                'taken_at': app.taken_at,
+                'postponed_until': app.postponed_until,
+                'processed_at': app.processed_at,
+                'problem_status': app.problem_status,
+                'problem_comment': app.problem_comment,
+                'problem_responsible': app.problem_responsible,
+                'epgu_action': app.epgu_action,
+                'epgu_processor_id': app.epgu_processor_id,
+                'needs_scans': app.needs_scans,
+                'needs_signature': app.needs_signature,
+                'scans_confirmed': app.scans_confirmed,
+                'signature_confirmed': app.signature_confirmed,
+                'processed_by_fio': app.processed_by.fio if app.processed_by else None
+            }
+            apps_data.append(app_data)
+        
+        return apps_data
 
 async def get_queue_statistics(queue_type: str):
     """Получить статистику по очереди"""

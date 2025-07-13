@@ -2,11 +2,15 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.exceptions import TelegramNetworkError, TelegramAPIError
 from db.crud import get_employee_by_tg_id, start_work_day, end_work_day, start_break, end_break, get_current_work_day, get_work_day_report, get_moscow_now, get_active_break
 from keyboards.main import main_menu_keyboard
 from keyboards.work_time import work_time_keyboard, work_status_keyboard
+from keyboards.escalation import escalation_menu_keyboard
 from datetime import datetime
 from utils.logger import get_logger
+from utils.excel import clear_web_cache
 import asyncio
 import aiohttp
 import pytz
@@ -32,6 +36,31 @@ async def clear_web_cache():
                     print(f"Failed to clear web cache: {response.status}")
     except Exception as e:
         print(f"Error clearing web cache: {e}")
+
+async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup=None, parse_mode=None):
+    """Безопасное редактирование сообщения с обработкой таймаутов"""
+    try:
+        await asyncio.wait_for(
+            callback.message.edit_text(
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            ),
+            timeout=15.0
+        )
+        return True
+    except asyncio.TimeoutError:
+        print(f"Таймаут при редактировании сообщения для пользователя {callback.from_user.id}")
+        return False
+    except TelegramNetworkError as e:
+        print(f"Сетевая ошибка при редактировании сообщения: {e}")
+        return False
+    except TelegramAPIError as e:
+        print(f"Ошибка API при редактировании сообщения: {e}")
+        return False
+    except Exception as e:
+        print(f"Ошибка при редактировании сообщения: {e}")
+        return False
 
 @router.message(Command("start"))
 @router.message(Command("help"))
@@ -108,9 +137,10 @@ async def work_time_menu(callback: CallbackQuery):
 
         message_text += f"Обработано заявлений: {current_work_day.applications_processed}"
         
-        await callback.message.edit_text(message_text, reply_markup=work_status_keyboard(display_status))
+        await safe_edit_message(callback, message_text, reply_markup=work_status_keyboard(display_status))
     else:
-        await callback.message.edit_text(
+        await safe_edit_message(
+            callback,
             "Рабочий день не начат. Нажмите кнопку, чтобы начать рабочий день.",
             reply_markup=work_time_keyboard()
         )
@@ -208,9 +238,10 @@ async def cancel_end_work_day_handler(callback: CallbackQuery):
         message_text += f"Время перерывов: {break_time_str}\n"
         message_text += f"Обработано заявлений: {current_work_day.applications_processed}"
         
-        await callback.message.edit_text(message_text, reply_markup=work_status_keyboard(display_status))
+        await safe_edit_message(callback, message_text, reply_markup=work_status_keyboard(display_status))
     else:
-        await callback.message.edit_text(
+        await safe_edit_message(
+            callback,
             "Рабочий день не начат. Нажмите кнопку, чтобы начать рабочий день.",
             reply_markup=work_time_keyboard()
         )

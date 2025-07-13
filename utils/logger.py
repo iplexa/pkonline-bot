@@ -1,6 +1,8 @@
 import logging
+import asyncio
 from typing import Optional, Dict, Any
 from aiogram import Bot
+from aiogram.exceptions import TelegramNetworkError, TelegramAPIError
 from config import GENERAL_CHAT_ID, ADMIN_LOG_CHAT_ID, THREAD_IDS
 import traceback
 from datetime import datetime
@@ -19,15 +21,27 @@ class TelegramLogger:
         
         try:
             thread_id = self.thread_ids[thread_name]
-            await self.bot.send_message(
-                chat_id=self.general_chat_id,
-                text=message,
-                message_thread_id=thread_id,
-                parse_mode=parse_mode
+            await asyncio.wait_for(
+                self.bot.send_message(
+                    chat_id=self.general_chat_id,
+                    text=message,
+                    message_thread_id=thread_id,
+                    parse_mode=parse_mode
+                ),
+                timeout=10.0  # Таймаут 10 секунд для логирования
             )
             return True
+        except asyncio.TimeoutError:
+            print(f"Таймаут при отправке в тред {thread_name}")
+            return False
+        except TelegramNetworkError as e:
+            print(f"Сетевая ошибка при отправке в тред {thread_name}: {e}")
+            return False
+        except TelegramAPIError as e:
+            print(f"Ошибка API при отправке в тред {thread_name}: {e}")
+            return False
         except Exception as e:
-            await self.log_error(f"Ошибка отправки в тред {thread_name}: {e}")
+            print(f"Ошибка отправки в тред {thread_name}: {e}")
             return False
     
     async def log_to_admin(self, message: str, parse_mode: str = "HTML") -> bool:
@@ -36,14 +50,25 @@ class TelegramLogger:
             return False
         
         try:
-            await self.bot.send_message(
-                chat_id=self.admin_chat_id,
-                text=message,
-                parse_mode=parse_mode
+            await asyncio.wait_for(
+                self.bot.send_message(
+                    chat_id=self.admin_chat_id,
+                    text=message,
+                    parse_mode=parse_mode
+                ),
+                timeout=10.0  # Таймаут 10 секунд для логирования
             )
             return True
+        except asyncio.TimeoutError:
+            print("Таймаут при отправке в админский чат")
+            return False
+        except TelegramNetworkError as e:
+            print(f"Сетевая ошибка при отправке в админский чат: {e}")
+            return False
+        except TelegramAPIError as e:
+            print(f"Ошибка API при отправке в админский чат: {e}")
+            return False
         except Exception as e:
-            # Если не можем отправить в админский чат, выводим в консоль
             print(f"Ошибка отправки в админский чат: {e}")
             return False
     

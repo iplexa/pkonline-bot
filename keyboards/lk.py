@@ -30,10 +30,27 @@ def lk_reason_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="❌ Отмена", callback_data="lk_cancel_reason")]
     ])
 
-def lk_escalate_keyboard(app_id: int, is_priority: bool):
+def lk_escalate_keyboard(app_id: int, is_priority: bool, status: str = "queued"):
+    """Улучшенная клавиатура для найденных заявлений ЛК"""
     buttons = []
-    if not is_priority:
+    
+    # Кнопка обработки заявления (если в очереди или в обработке)
+    if status in ["queued", "in_progress"]:
+        if status == "queued":
+            button_text = "🔄 Обработать заявление"
+        else:
+            button_text = "🔄 Взять в обработку"
+        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"lk_process_found_{app_id}")])
+    
+    # Кнопка эскалации (только если не приоритетное и в очереди)
+    if not is_priority and status == "queued":
         buttons.append([InlineKeyboardButton(text="🚨 Эскалировать", callback_data=f"lk_escalate_{app_id}")])
-    buttons.append([InlineKeyboardButton(text="🔍 Найти еще", callback_data="lk_search_fio")])
+    
+    # Навигационные кнопки
+    buttons.append([
+        InlineKeyboardButton(text="🔍 Найти еще", callback_data="lk_search_fio"),
+        InlineKeyboardButton(text="📋 Следующее", callback_data="lk_next")
+    ])
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="lk_menu")])
+    
     return InlineKeyboardMarkup(inline_keyboard=buttons) 

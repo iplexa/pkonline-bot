@@ -38,9 +38,13 @@ def epgu_escalate_keyboard(app_id: int, is_priority: bool, status: str = "queued
     """Улучшенная клавиатура для найденных заявлений"""
     buttons = []
     
-    # Кнопка обработки заявления (только если в очереди)
-    if status == "queued":
-        buttons.append([InlineKeyboardButton(text="🔄 Обработать заявление", callback_data=f"epgu_process_found_{app_id}")])
+    # Кнопка обработки заявления (если в очереди или в обработке)
+    if status in ["queued", "in_progress"]:
+        if status == "queued":
+            button_text = "🔄 Обработать заявление"
+        else:
+            button_text = "🔄 Взять в обработку"
+        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"epgu_process_found_{app_id}")])
     
     # Кнопка эскалации (только если не приоритетное и в очереди)
     if not is_priority and status == "queued":

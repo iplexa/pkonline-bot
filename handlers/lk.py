@@ -3,7 +3,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery
-from db.crud import get_next_application, update_application_status, get_employee_by_tg_id, has_access, return_application_to_queue, increment_processed_applications, get_application_by_id, get_applications_by_fio_and_queue, escalate_application
+from db.crud import get_next_application, update_application_status, get_employee_by_tg_id, has_access, return_application_to_queue, increment_processed_applications, get_application_by_id, get_applications_by_fio_and_queue, escalate_application, update_application_field, get_moscow_now
 from db.models import ApplicationStatusEnum
 from keyboards.lk import lk_queue_keyboard, lk_decision_keyboard, lk_reason_keyboard, lk_escalate_keyboard
 from keyboards.main import main_menu_keyboard
@@ -147,23 +147,97 @@ async def lk_search_fio_process(message: Message, state: FSMContext):
     emp = await get_employee_by_tg_id(str(message.from_user.id))
     if not emp or not await has_access(str(message.from_user.id), "lk"):
         return
+    
     fio = message.text.strip()
     if not fio:
         await message.answer("Пожалуйста, введите ФИО.", reply_markup=lk_decision_keyboard(menu=True))
         return
+    
     apps = await get_applications_by_fio_and_queue(fio, "lk")
     if not apps:
         await message.answer(f"Заявления для '{fio}' не найдены.", reply_markup=lk_decision_keyboard(menu=True))
         await state.clear()
         return
-    for app in apps:
-        text = f"📋 Заявление ЛК #{app.id}\n\n"
-        text += f"👨‍💼 ФИО: {app.fio}\n"
-        text += f"📅 Дата подачи: {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
+    
+    # Статус эмодзи
+    status_emoji = {
+        'queued': '⏳',
+        'in_progress': '🔄',
+        'accepted': '✅',
+        'rejected': '❌',
+        'problem': '⚠️'
+    }
+    
+    # Статус текст
+    status_text = {
+        'queued': 'В очереди',
+        'in_progress': 'В обработке',
+        'accepted': 'Принято',
+        'rejected': 'Отклонено',
+        'problem': 'Проблемное'
+    }
+    
+    # Сортируем заявления: сначала в очереди, потом по дате
+    queued_apps = [app for app in apps if app.status.value == 'queued']
+    other_apps = [app for app in apps if app.status.value != 'queued']
+    
+    # Сортируем по дате подачи (новые сначала)
+    queued_apps.sort(key=lambda x: x.submitted_at, reverse=True)
+    other_apps.sort(key=lambda x: x.submitted_at, reverse=True)
+    
+    sorted_apps = queued_apps + other_apps
+    
+    # Отправляем сводку результатов
+    summary_text = f"🔍 <b>Результаты поиска</b>\n\n"
+    summary_text += f"По запросу '<code>{fio}</code>' найдено <b>{len(apps)}</b> заявлений:\n\n"
+    
+    queued_count = len(queued_apps)
+    in_progress_count = len([app for app in apps if app.status.value == 'in_progress'])
+    completed_count = len([app for app in apps if app.status.value in ['accepted', 'rejected']])
+    problem_count = len([app for app in apps if app.status.value == 'problem'])
+    
+    if queued_count > 0:
+        summary_text += f"⏳ В очереди: <b>{queued_count}</b>\n"
+    if in_progress_count > 0:
+        summary_text += f"🔄 В обработке: <b>{in_progress_count}</b>\n"
+    if completed_count > 0:
+        summary_text += f"✅ Завершено: <b>{completed_count}</b>\n"
+    if problem_count > 0:
+        summary_text += f"⚠️ Проблемные: <b>{problem_count}</b>\n"
+    
+    await message.answer(
+        summary_text,
+        reply_markup=lk_decision_keyboard(menu=True),
+        parse_mode="HTML"
+    )
+    
+    # Отправляем детальную информацию по каждому заявлению
+    for i, app in enumerate(sorted_apps, 1):
+        text = f"📋 <b>Заявление ЛК #{app.id}</b> ({i}/{len(sorted_apps)})\n\n"
+        text += f"👨‍💼 <b>ФИО:</b> {app.fio}\n"
+        text += f"📅 <b>Дата подачи:</b> {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
+        text += f"📊 <b>Статус:</b> {status_emoji.get(app.status.value, '❓')} {status_text.get(app.status.value, app.status.value)}\n"
+        
         if app.is_priority:
-            text += "🚨 ПРИОРИТЕТНОЕ\n"
-        text += f"🔍 Поисковый запрос: '{fio}'\n"
-        await message.answer(text, reply_markup=lk_escalate_keyboard(app.id, app.is_priority))
+            text += "🚨 <b>ПРИОРИТЕТНОЕ</b>\n"
+        
+        if app.status_reason:
+            text += f"💬 <b>Причина:</b> {app.status_reason}\n"
+        
+        if app.processed_by:
+            text += f"👤 <b>Обработал:</b> {app.processed_by.fio}\n"
+        
+        if app.processed_at:
+            text += f"⏰ <b>Время обработки:</b> {app.processed_at.strftime('%d.%m.%Y %H:%M')}\n"
+        
+        text += f"\n🔍 <b>Поисковый запрос:</b> '<code>{fio}</code>'"
+        
+        await message.answer(
+            text, 
+            reply_markup=lk_escalate_keyboard(app.id, app.is_priority, app.status.value), 
+            parse_mode="HTML"
+        )
+    
     await state.clear()
 
 @router.callback_query(F.data.startswith("lk_escalate_"))
@@ -182,4 +256,81 @@ async def lk_escalate_handler(callback: CallbackQuery):
             await logger.log_escalation(app.id, app.queue_type, emp.fio, reason="Эскалация через поиск по ФИО")
         await callback.message.edit_text(f"✅ Заявление {app_id} эскалировано (приоритетное)", reply_markup=lk_decision_keyboard(menu=True))
     else:
-        await callback.message.edit_text("❌ Не удалось эскалировать заявление.", reply_markup=lk_decision_keyboard(menu=True)) 
+        await callback.message.edit_text("❌ Не удалось эскалировать заявление.", reply_markup=lk_decision_keyboard(menu=True))
+
+@router.callback_query(F.data.startswith("lk_process_found_"))
+async def lk_process_found_application(callback: CallbackQuery, state: FSMContext):
+    emp = await get_employee_by_tg_id(str(callback.from_user.id))
+    if not emp or not await has_access(str(callback.from_user.id), "lk"):
+        return
+    
+    app_id = int(callback.data.replace("lk_process_found_", ""))
+    app = await get_application_by_id(app_id)
+    
+    if not app:
+        await callback.message.edit_text(
+            "❌ Заявление не найдено.",
+            reply_markup=lk_decision_keyboard(menu=True)
+        )
+        return
+    
+    # Проверяем, что заявление в очереди ЛК
+    if app.queue_type != "lk":
+        await callback.message.edit_text(
+            "❌ Это заявление не в очереди ЛК.",
+            reply_markup=lk_decision_keyboard(menu=True)
+        )
+        return
+    
+    # Проверяем, что заявление в очереди или в обработке
+    if app.status not in [ApplicationStatusEnum.QUEUED, ApplicationStatusEnum.IN_PROGRESS]:
+        await callback.message.edit_text(
+            "❌ Это заявление уже обработано или имеет другой статус.",
+            reply_markup=lk_decision_keyboard(menu=True)
+        )
+        return
+    
+    # Если заявление уже в обработке, проверяем, не обрабатывает ли его кто-то другой
+    if app.status == ApplicationStatusEnum.IN_PROGRESS and app.processed_by_id and app.processed_by_id != emp.id:
+        # Заявление уже обрабатывается другим сотрудником
+        await callback.message.edit_text(
+            f"❌ Это заявление уже обрабатывается сотрудником {app.processed_by.fio}.\n\n"
+            f"Вы можете эскалировать заявление или дождаться завершения обработки.",
+            reply_markup=lk_decision_keyboard(menu=True)
+        )
+        return
+    
+    # Берем заявление в обработку (если оно еще не в обработке)
+    if app.status == ApplicationStatusEnum.QUEUED:
+        await update_application_status(app_id, ApplicationStatusEnum.IN_PROGRESS, employee_id=emp.id)
+        await update_application_field(app_id, "taken_at", get_moscow_now())
+    
+    # Сохраняем ID заявления в состоянии для дальнейшей обработки
+    await state.update_data(app_id=app_id)
+    
+    # Показываем информацию о заявлении и кнопки для принятия решения
+    text = f"🔄 <b>Обработка заявления ЛК</b>\n\n"
+    text += f"🆔 <b>ID:</b> {app.id}\n"
+    text += f"👨‍💼 <b>ФИО:</b> {app.fio}\n"
+    text += f"📅 <b>Дата подачи:</b> {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
+    text += f"👤 <b>Обрабатывает:</b> {emp.fio}\n"
+    
+    if app.status == ApplicationStatusEnum.QUEUED:
+        text += f"⏰ <b>Взято в обработку:</b> {get_moscow_now().strftime('%d.%m.%Y %H:%M')}\n"
+    else:
+        text += f"⏰ <b>В обработке с:</b> {app.taken_at.strftime('%d.%m.%Y %H:%M') if app.taken_at else 'неизвестно'}\n"
+    
+    if app.is_priority:
+        text += "🚨 <b>ПРИОРИТЕТНОЕ</b>\n"
+    
+    if app.status_reason:
+        text += f"💬 <b>Причина:</b> {app.status_reason}\n"
+    
+    text += f"\n<b>Выберите действие:</b>"
+    
+    await callback.message.edit_text(
+        text, 
+        reply_markup=lk_decision_keyboard(menu=False), 
+        parse_mode="HTML"
+    )
+    await state.set_state(LKStates.waiting_decision) 

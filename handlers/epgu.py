@@ -378,8 +378,9 @@ async def epgu_search_info_handler(callback: CallbackQuery):
         "ℹ️ Информация о поиске\n\n"
         "• Поиск выполняется по частичному совпадению ФИО\n"
         "• Заявления сортируются: сначала в очереди, потом по дате\n"
-        "• Можно обрабатывать только заявления в статусе 'В очереди'\n"
-        "• Эскалировать можно только не приоритетные заявления",
+        "• Можно обрабатывать заявления в статусе 'В очереди' и 'В обработке'\n"
+        "• Если заявление уже обрабатывается другим сотрудником, вы получите уведомление\n"
+        "• Эскалировать можно только не приоритетные заявления в очереди",
         show_alert=True
     )
 
@@ -482,17 +483,28 @@ async def epgu_process_found_application(callback: CallbackQuery, state: FSMCont
         )
         return
     
-    # Проверяем, что заявление в очереди (не в обработке)
-    if app.status != ApplicationStatusEnum.QUEUED:
+    # Проверяем, что заявление в очереди или в обработке
+    if app.status not in [ApplicationStatusEnum.QUEUED, ApplicationStatusEnum.IN_PROGRESS]:
         await callback.message.edit_text(
-            "❌ Это заявление уже обрабатывается или обработано.",
+            "❌ Это заявление уже обработано или имеет другой статус.",
             reply_markup=epgu_decision_keyboard(menu=True)
         )
         return
     
-    # Берем заявление в обработку
-    await update_application_status(app_id, ApplicationStatusEnum.IN_PROGRESS, employee_id=emp.id)
-    await update_application_field(app_id, "taken_at", get_moscow_now())
+    # Если заявление уже в обработке, проверяем, не обрабатывает ли его кто-то другой
+    if app.status == ApplicationStatusEnum.IN_PROGRESS and app.processed_by_id and app.processed_by_id != emp.id:
+        # Заявление уже обрабатывается другим сотрудником
+        await callback.message.edit_text(
+            f"❌ Это заявление уже обрабатывается сотрудником {app.processed_by.fio}.\n\n"
+            f"Вы можете эскалировать заявление или дождаться завершения обработки.",
+            reply_markup=epgu_decision_keyboard(menu=True)
+        )
+        return
+    
+    # Берем заявление в обработку (если оно еще не в обработке)
+    if app.status == ApplicationStatusEnum.QUEUED:
+        await update_application_status(app_id, ApplicationStatusEnum.IN_PROGRESS, employee_id=emp.id)
+        await update_application_field(app_id, "taken_at", get_moscow_now())
     
     # Сохраняем ID заявления в состоянии для дальнейшей обработки
     await state.update_data(app_id=app_id)
@@ -503,7 +515,11 @@ async def epgu_process_found_application(callback: CallbackQuery, state: FSMCont
     text += f"👨‍💼 <b>ФИО:</b> {app.fio}\n"
     text += f"📅 <b>Дата подачи:</b> {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
     text += f"👤 <b>Обрабатывает:</b> {emp.fio}\n"
-    text += f"⏰ <b>Взято в обработку:</b> {get_moscow_now().strftime('%d.%m.%Y %H:%M')}\n"
+    
+    if app.status == ApplicationStatusEnum.QUEUED:
+        text += f"⏰ <b>Взято в обработку:</b> {get_moscow_now().strftime('%d.%m.%Y %H:%M')}\n"
+    else:
+        text += f"⏰ <b>В обработке с:</b> {app.taken_at.strftime('%d.%m.%Y %H:%M') if app.taken_at else 'неизвестно'}\n"
     
     if app.is_priority:
         text += "🚨 <b>ПРИОРИТЕТНОЕ</b>\n"

@@ -1,4 +1,4 @@
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete
 from sqlalchemy.orm import selectinload
 from .models import Application, ApplicationStatusEnum, Employee, Group, WorkDay, WorkBreak, WorkDayStatusEnum
 from datetime import datetime, timedelta, date
@@ -1059,6 +1059,36 @@ async def admin_end_work_day(employee_id: int):
         await session.commit()
         return work_day, "Рабочий день успешно завершен"
 
+async def clear_work_time_data():
+    """Очистить все данные рабочего времени"""
+    async for session in get_session():
+        try:
+            # Удаляем все перерывы
+            stmt = delete(WorkBreak)
+            result = await session.execute(stmt)
+            breaks_deleted = result.rowcount
+            
+            # Удаляем все рабочие дни
+            stmt = delete(WorkDay)
+            result = await session.execute(stmt)
+            work_days_deleted = result.rowcount
+            
+            await session.commit()
+            
+            return {
+                "success": True,
+                "work_days_deleted": work_days_deleted,
+                "breaks_deleted": breaks_deleted,
+                "message": f"Удалено {work_days_deleted} рабочих дней и {breaks_deleted} перерывов"
+            }
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"Ошибка при очистке данных рабочего времени: {e}")
+            return {
+                "success": False,
+                "message": f"Ошибка при очистке: {str(e)}"
+            }
+
 async def escalate_application(app_id: int):
     """Выставить приоритет заявлению по app_id"""
     async for session in get_session():
@@ -1245,12 +1275,12 @@ async def import_1c_applications_from_excel(file_path, progress_callback=None):
     parsed_data = await parse_1c_applications_from_excel(file_path, progress_callback)
     
     logger = logging.getLogger("1c_import")
-    logger.info(f"Импорт заявлений из 1С: ЛК={len(parsed_data['lk'])}, ЕПГУ={len(parsed_data['epgu'])}")
+    logger.info(f"Импорт заявлений из 1С: ЛК={len(parsed_data['lk'])}, ЕПГУ={len(parsed_data['epgu'])}, UNKNOWN={len(parsed_data.get('unknown', []))}")
     
     # Отправляем информацию о начале работы с БД
     if progress_callback:
         try:
-            await progress_callback(f"💾 Начинаю работу с базой данных...\nЛК: {len(parsed_data['lk'])} заявлений\nЕПГУ: {len(parsed_data['epgu'])} заявлений")
+            await progress_callback(f"💾 Начинаю работу с базой данных...\nЛК: {len(parsed_data['lk'])} заявлений\nЕПГУ: {len(parsed_data['epgu'])}\nНеизвестный способ: {len(parsed_data.get('unknown', []))}")
         except:
             pass
     
@@ -1261,19 +1291,14 @@ async def import_1c_applications_from_excel(file_path, progress_callback=None):
         lk_added = 0
         lk_updated = 0
         lk_skipped = 0
-        
         lk_processed = 0
         for app in parsed_data['lk']:
             lk_processed += 1
-            
-            # Показываем прогресс каждые 250 ЛК заявлений
             if lk_processed % 250 == 0 and progress_callback:
                 try:
                     await progress_callback(f"💾 Обрабатываю ЛК заявления: {lk_processed}/{len(parsed_data['lk'])}")
                 except:
                     pass
-            
-            # Проверяем существующее заявление
             existing = await session.execute(
                 select(Application).where(
                     Application.fio == app['fio'],
@@ -1281,11 +1306,8 @@ async def import_1c_applications_from_excel(file_path, progress_callback=None):
                 )
             )
             existing_app = existing.scalars().first()
-            
             if existing_app:
-                # Заявление уже существует - проверяем изменения
                 if existing_app.status.value != app['status'] or existing_app.is_priority != app['is_priority']:
-                    # Обновляем статус
                     existing_app.status = ApplicationStatusEnum(app['status'])
                     existing_app.is_priority = app['is_priority']
                     if app['status_reason']:
@@ -1297,7 +1319,6 @@ async def import_1c_applications_from_excel(file_path, progress_callback=None):
                 else:
                     lk_skipped += 1
             else:
-                # Новое заявление
                 new_app = Application(
                     fio=app['fio'],
                     submitted_at=app['submitted_at'],
@@ -1311,31 +1332,23 @@ async def import_1c_applications_from_excel(file_path, progress_callback=None):
                 session.add(new_app)
                 lk_added += 1
                 logger.info(f"Добавлено ЛК заявление: {app['fio']} - {app['status']}")
-        
         # Обрабатываем ЕПГУ заявления
         epgu_added = 0
         epgu_updated = 0
         epgu_skipped = 0
-        
-        # Отправляем информацию о завершении ЛК и начале ЕПГУ
         if progress_callback:
             try:
                 await progress_callback(f"✅ ЛК заявления обработаны\n💾 Начинаю обработку ЕПГУ заявлений...")
             except:
                 pass
-        
         epgu_processed = 0
         for app in parsed_data['epgu']:
             epgu_processed += 1
-            
-            # Показываем прогресс каждые 250 ЕПГУ заявлений
             if epgu_processed % 250 == 0 and progress_callback:
                 try:
                     await progress_callback(f"💾 Обрабатываю ЕПГУ заявления: {epgu_processed}/{len(parsed_data['epgu'])}")
                 except:
                     pass
-            
-            # Проверяем существующее заявление
             existing = await session.execute(
                 select(Application).where(
                     Application.fio == app['fio'],
@@ -1344,11 +1357,8 @@ async def import_1c_applications_from_excel(file_path, progress_callback=None):
                 )
             )
             existing_app = existing.scalars().first()
-            
             if existing_app:
-                # Заявление уже существует - проверяем изменения
                 if existing_app.status.value != app['status']:
-                    # Обновляем статус
                     existing_app.status = ApplicationStatusEnum(app['status'])
                     if app['status_reason']:
                         existing_app.status_reason = app['status_reason']
@@ -1359,7 +1369,6 @@ async def import_1c_applications_from_excel(file_path, progress_callback=None):
                 else:
                     epgu_skipped += 1
             else:
-                # Новое заявление
                 new_app = Application(
                     fio=app['fio'],
                     submitted_at=app['submitted_at'],
@@ -1373,16 +1382,60 @@ async def import_1c_applications_from_excel(file_path, progress_callback=None):
                 session.add(new_app)
                 epgu_added += 1
                 logger.info(f"Добавлено ЕПГУ заявление: {app['fio']} - {app['status']}")
-        
+        # Обрабатываем UNKNOWN заявления
+        unknown_added = 0
+        unknown_updated = 0
+        unknown_skipped = 0
+        unknown_list = parsed_data.get('unknown', [])
+        if unknown_list:
+            if progress_callback:
+                try:
+                    await progress_callback(f"✅ ЕПГУ заявления обработаны\n💾 Начинаю обработку заявлений с неизвестным способом подачи...")
+                except:
+                    pass
+            unknown_processed = 0
+            for app in unknown_list:
+                unknown_processed += 1
+                if unknown_processed % 250 == 0 and progress_callback:
+                    try:
+                        await progress_callback(f"💾 Обрабатываю unknown заявления: {unknown_processed}/{len(unknown_list)}")
+                    except:
+                        pass
+                existing = await session.execute(
+                    select(Application).where(
+                        Application.fio == app['fio'],
+                        Application.submitted_at == app['submitted_at'],
+                        Application.queue_type == 'unknown'
+                    )
+                )
+                existing_app = existing.scalars().first()
+                if existing_app:
+                    # Для unknown обновляем только статус_reason
+                    if existing_app.status.value != app['status'] or existing_app.status_reason != app['status_reason']:
+                        existing_app.status = ApplicationStatusEnum(app['status'])
+                        existing_app.status_reason = app['status_reason']
+                        unknown_updated += 1
+                        logger.info(f"Обновлено unknown заявление: {app['fio']} - {app['status']}")
+                    else:
+                        unknown_skipped += 1
+                else:
+                    new_app = Application(
+                        fio=app['fio'],
+                        submitted_at=app['submitted_at'],
+                        queue_type='unknown',
+                        status=ApplicationStatusEnum(app['status']),
+                        is_priority=app['is_priority'],
+                        status_reason=app['status_reason']
+                    )
+                    session.add(new_app)
+                    unknown_added += 1
+                    logger.info(f"Добавлено unknown заявление: {app['fio']} - {app['status']}")
         await session.commit()
-        
-        # Отправляем финальное сообщение о завершении работы с БД
         if progress_callback:
             try:
                 await progress_callback(f"✅ Работа с базой данных завершена\n💾 Сохраняю изменения...")
             except:
                 pass
-        
         results = {
             'lk': {
                 'added': lk_added,
@@ -1395,10 +1448,15 @@ async def import_1c_applications_from_excel(file_path, progress_callback=None):
                 'updated': epgu_updated,
                 'skipped': epgu_skipped,
                 'total': len(parsed_data['epgu'])
+            },
+            'unknown': {
+                'added': unknown_added,
+                'updated': unknown_updated,
+                'skipped': unknown_skipped,
+                'total': len(unknown_list)
             }
         }
-        
         logger.info(f"Импорт завершен: ЛК добавлено={lk_added}, обновлено={lk_updated}, пропущено={lk_skipped}")
         logger.info(f"Импорт завершен: ЕПГУ добавлено={epgu_added}, обновлено={epgu_updated}, пропущено={epgu_skipped}")
-    
+        logger.info(f"Импорт завершен: UNKNOWN добавлено={unknown_added}, обновлено={unknown_updated}, пропущено={unknown_skipped}")
     return results 

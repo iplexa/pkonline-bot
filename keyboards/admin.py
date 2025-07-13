@@ -163,5 +163,6 @@ def admin_work_time_management_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="▶️ Начать рабочий день", callback_data="admin_start_work_day")],
         [InlineKeyboardButton(text="⏹️ Завершить рабочий день", callback_data="admin_end_work_day")],
+        [InlineKeyboardButton(text="🗑️ Очистить данные рабочего времени", callback_data="admin_clear_work_time")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_staff_menu")]
     ]) 

@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from db.crud import (
     add_employee, remove_employee, add_group_to_employee, remove_group_from_employee, list_employees_with_groups, is_admin, get_employee_by_tg_id, get_applications_by_queue_type, clear_queue_by_type, import_applications_from_excel, import_1c_applications_from_excel, get_all_work_days_report,
     get_applications_statistics_by_queue, search_applications_by_fio, update_application_field, delete_application, get_all_employees, export_overdue_mail_applications_to_excel, create_database_backup,
-    update_employee_fio, get_employee_by_id, admin_start_work_day, admin_end_work_day
+    update_employee_fio, get_employee_by_id, admin_start_work_day, admin_end_work_day, clear_work_time_data
 )
 from keyboards.admin import admin_main_menu_keyboard, admin_staff_menu_keyboard, admin_queue_menu_keyboard, admin_queue_type_keyboard, admin_queue_pagination_keyboard, group_choice_keyboard, admin_reports_menu_keyboard, admin_search_applications_keyboard, admin_application_edit_keyboard, admin_queue_choice_keyboard, admin_status_choice_keyboard, admin_problem_status_choice_keyboard, admin_cancel_keyboard, admin_chat_settings_keyboard, admin_thread_settings_keyboard, admin_employee_selection_keyboard, admin_work_time_management_keyboard
 from keyboards.main import main_menu_keyboard
@@ -2155,3 +2155,57 @@ async def admin_employee_end_work_day(callback: CallbackQuery, state: FSMContext
             f"❌ {message}",
             reply_markup=admin_work_time_management_keyboard()
         ) 
+
+@router.callback_query(F.data == "admin_clear_work_time")
+async def admin_clear_work_time(callback: CallbackQuery, state: FSMContext):
+    """Очистка данных рабочего времени"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    # Создаем клавиатуру подтверждения
+    confirm_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, очистить", callback_data="admin_confirm_clear_work_time")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_work_time_management")]
+    ])
+    
+    await callback.message.edit_text(
+        "⚠️ Подтверждение очистки данных рабочего времени\n\n"
+        "Это действие удалит ВСЕ данные о рабочих днях и перерывах всех сотрудников.\n"
+        "Данные будут удалены безвозвратно!\n\n"
+        "Вы уверены, что хотите продолжить?",
+        reply_markup=confirm_keyboard
+    )
+
+@router.callback_query(F.data == "admin_confirm_clear_work_time")
+async def admin_confirm_clear_work_time(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение очистки данных рабочего времени"""
+    if not await check_admin(callback.from_user.id):
+        return
+    
+    # Показываем сообщение о начале процесса
+    await callback.message.edit_text("🗑️ Очищаю данные рабочего времени...")
+    
+    try:
+        # Выполняем очистку
+        result = await clear_work_time_data()
+        
+        if result["success"]:
+            await callback.message.edit_text(
+                f"✅ {result['message']}\n\n"
+                f"🗑️ Удалено рабочих дней: {result['work_days_deleted']}\n"
+                f"🗑️ Удалено перерывов: {result['breaks_deleted']}\n\n"
+                f"Данные рабочего времени успешно очищены.",
+                reply_markup=admin_work_time_management_keyboard()
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ {result['message']}",
+                reply_markup=admin_work_time_management_keyboard()
+            )
+            
+    except Exception as e:
+        logging.error(f"Ошибка при очистке данных рабочего времени: {e}")
+        await callback.message.edit_text(
+            f"❌ Ошибка при очистке данных рабочего времени: {str(e)}",
+            reply_markup=admin_work_time_management_keyboard()
+        )

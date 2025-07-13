@@ -83,6 +83,7 @@ async def parse_1c_applications_from_excel(file_path: str, progress_callback=Non
     
     lk_applications = []
     epgu_applications = []
+    unknown_applications = []
     
     processed_count = 0
     
@@ -158,9 +159,13 @@ async def parse_1c_applications_from_excel(file_path: str, progress_callback=Non
             else:
                 continue  # Пропускаем другие статусы
                 
-        # Пропускаем личные и пустые способы подачи
+        # Пустой или нераспознанный способ подачи — отдельная очередь
         else:
-            continue
+            queue_type = "unknown"
+            # Для unknown — сохраняем только базовые поля, статус = queued
+            app_status = "queued"
+            # Можно добавить причину
+            status_reason = f"Неизвестный способ подачи: '{submission_method}'"
         
         # Создаем объект заявления
         application = {
@@ -177,10 +182,13 @@ async def parse_1c_applications_from_excel(file_path: str, progress_callback=Non
             lk_applications.append(application)
         elif queue_type == "epgu":
             epgu_applications.append(application)
+        elif queue_type == "unknown":
+            unknown_applications.append(application)
     
     # Сортируем заявления
     lk_applications.sort(key=lambda x: (not x["is_priority"], x["submitted_at"]))
     epgu_applications.sort(key=lambda x: x["submitted_at"])
+    unknown_applications.sort(key=lambda x: x["submitted_at"])
     
     final_text = f"✅ Обработка завершена. Всего обработано строк: {processed_count}"
     print(final_text)
@@ -192,8 +200,10 @@ async def parse_1c_applications_from_excel(file_path: str, progress_callback=Non
     
     print(f"Найдено ЛК заявлений: {len(lk_applications)}")
     print(f"Найдено ЕПГУ заявлений: {len(epgu_applications)}")
+    print(f"Найдено заявлений с неизвестным способом подачи: {len(unknown_applications)}")
     
     return {
         "lk": lk_applications,
-        "epgu": epgu_applications
+        "epgu": epgu_applications,
+        "unknown": unknown_applications
     } 

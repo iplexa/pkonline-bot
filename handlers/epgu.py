@@ -363,9 +363,6 @@ async def epgu_search_fio_process(message: Message, state: FSMContext):
         
         text += f"\n🔍 <b>Поисковый запрос:</b> '<code>{fio}</code>'"
         
-        # Отладочная информация
-        print(f"DEBUG: Заявление {app.id}, статус: {app.status.value}, приоритет: {app.is_priority}")
-        
         await message.answer(
             text, 
             reply_markup=epgu_escalate_keyboard(app.id, app.is_priority, app.status.value), 

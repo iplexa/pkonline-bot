@@ -187,30 +187,6 @@ async def lk_search_fio_process(message: Message, state: FSMContext):
     
     sorted_apps = queued_apps + other_apps
     
-    # Отправляем сводку результатов
-    summary_text = f"🔍 <b>Результаты поиска</b>\n\n"
-    summary_text += f"По запросу '<code>{fio}</code>' найдено <b>{len(apps)}</b> заявлений:\n\n"
-    
-    queued_count = len(queued_apps)
-    in_progress_count = len([app for app in apps if app.status.value == 'in_progress'])
-    completed_count = len([app for app in apps if app.status.value in ['accepted', 'rejected']])
-    problem_count = len([app for app in apps if app.status.value == 'problem'])
-    
-    if queued_count > 0:
-        summary_text += f"⏳ В очереди: <b>{queued_count}</b>\n"
-    if in_progress_count > 0:
-        summary_text += f"🔄 В обработке: <b>{in_progress_count}</b>\n"
-    if completed_count > 0:
-        summary_text += f"✅ Завершено: <b>{completed_count}</b>\n"
-    if problem_count > 0:
-        summary_text += f"⚠️ Проблемные: <b>{problem_count}</b>\n"
-    
-    await message.answer(
-        summary_text,
-        reply_markup=lk_decision_keyboard(menu=True),
-        parse_mode="HTML"
-    )
-    
     # Отправляем детальную информацию по каждому заявлению
     for i, app in enumerate(sorted_apps, 1):
         text = f"📋 <b>Заявление ЛК #{app.id}</b> ({i}/{len(sorted_apps)})\n\n"

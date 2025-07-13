@@ -1,6 +1,5 @@
 import asyncio
 from aiogram import Bot, Dispatcher
-from aiogram.client.session.aiohttp import AiohttpSession
 
 from config import BOT_TOKEN, ADMIN_USER_ID
 from handlers.common import router as common_router
@@ -24,16 +23,8 @@ async def ensure_admin():
         await add_employee(str(ADMIN_USER_ID), "Администратор", is_admin_flag=True)
 
 async def main():
-    # Создаем сессию с увеличенными таймаутами
-    session = AiohttpSession(
-        timeout=30.0,  # Увеличиваем таймаут до 30 секунд
-        connect_timeout=10.0,  # Таймаут подключения
-        read_timeout=30.0,  # Таймаут чтения
-        write_timeout=30.0,  # Таймаут записи
-        pool_timeout=30.0,  # Таймаут пула соединений
-    )
-    
-    bot = Bot(token=BOT_TOKEN, session=session)
+    # Создаем бота с настройками по умолчанию
+    bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
     
     # Инициализируем логгер
@@ -54,7 +45,7 @@ async def main():
     await ensure_admin()
     
     # Запускаем бота с увеличенными таймаутами
-    await dp.start_polling(bot, polling_timeout=30, request_timeout=30)
+    await dp.start_polling(bot, polling_timeout=30)
 
 if __name__ == "__main__":
     asyncio.run(main()) 

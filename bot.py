@@ -1,7 +1,7 @@
 import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.client.telegram import TelegramAPIServer
+
 from config import BOT_TOKEN, ADMIN_USER_ID
 from handlers.common import router as common_router
 from handlers.lk import router as lk_router
@@ -26,7 +26,6 @@ async def ensure_admin():
 async def main():
     # Создаем сессию с увеличенными таймаутами
     session = AiohttpSession(
-        api_url="https://api.telegram.org",
         timeout=30.0,  # Увеличиваем таймаут до 30 секунд
         connect_timeout=10.0,  # Таймаут подключения
         read_timeout=30.0,  # Таймаут чтения
@@ -55,7 +54,7 @@ async def main():
     await ensure_admin()
     
     # Запускаем бота с увеличенными таймаутами
-    await dp.start_polling(bot, polling_timeout=30, timeout=30)
+    await dp.start_polling(bot, polling_timeout=30, request_timeout=30)
 
 if __name__ == "__main__":
     asyncio.run(main()) 

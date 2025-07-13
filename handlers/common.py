@@ -1,26 +1,16 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramNetworkError, TelegramAPIError
 from db.crud import get_employee_by_tg_id, start_work_day, end_work_day, start_break, end_break, get_current_work_day, get_work_day_report, get_moscow_now, get_active_break
 from keyboards.main import main_menu_keyboard
 from keyboards.work_time import work_time_keyboard, work_status_keyboard
-from keyboards.escalation import escalation_menu_keyboard
 from datetime import datetime
 from utils.logger import get_logger
-from utils.excel import clear_web_cache
 import asyncio
 import aiohttp
-import pytz
 
 router = Router()
-
-def get_moscow_now():
-    """Получить текущее время в московском времени"""
-    moscow_tz = pytz.timezone('Europe/Moscow')
-    return datetime.now(moscow_tz).replace(tzinfo=None)
 
 async def clear_web_cache():
     """Очистить кэш веб-интерфейса"""

@@ -36,6 +36,8 @@ def epgu_reason_keyboard() -> InlineKeyboardMarkup:
 
 def epgu_escalate_keyboard(app_id: int, is_priority: bool, status: str = "queued"):
     """Улучшенная клавиатура для найденных заявлений"""
+    print(f"DEBUG: epgu_escalate_keyboard called with app_id={app_id}, is_priority={is_priority}, status={status}")
+    
     buttons = []
     
     # Кнопка обработки заявления (если в очереди или в обработке)
@@ -45,10 +47,12 @@ def epgu_escalate_keyboard(app_id: int, is_priority: bool, status: str = "queued
         else:
             button_text = "🔄 Взять в обработку"
         buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"epgu_process_found_{app_id}")])
+        print(f"DEBUG: Added process button for status={status}")
     
     # Кнопка эскалации (только если не приоритетное и в очереди)
     if not is_priority and status == "queued":
         buttons.append([InlineKeyboardButton(text="🚨 Эскалировать", callback_data=f"epgu_escalate_{app_id}")])
+        print(f"DEBUG: Added escalate button (not priority, queued)")
     
     # Навигационные кнопки
     buttons.append([
@@ -56,6 +60,8 @@ def epgu_escalate_keyboard(app_id: int, is_priority: bool, status: str = "queued
         InlineKeyboardButton(text="📋 Следующее", callback_data="epgu_next")
     ])
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="epgu_menu")])
+    
+    print(f"DEBUG: Total buttons: {len(buttons)}")
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def epgu_search_results_keyboard(fio: str, total_found: int):

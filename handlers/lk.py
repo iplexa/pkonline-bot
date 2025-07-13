@@ -213,6 +213,9 @@ async def lk_search_fio_process(message: Message, state: FSMContext):
         
         text += f"\n🔍 <b>Поисковый запрос:</b> '<code>{fio}</code>'"
         
+        # Отладочная информация
+        print(f"DEBUG: app.id={app.id}, app.is_priority={app.is_priority}, app.status.value={app.status.value}")
+        
         await message.answer(
             text, 
             reply_markup=lk_escalate_keyboard(app.id, app.is_priority, app.status.value), 

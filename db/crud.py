@@ -755,6 +755,7 @@ async def get_next_epgu_application(employee_id: int = None, bot=None):
             Application.status == ApplicationStatusEnum.QUEUED,
             (Application.postponed_until.is_(None) | (Application.postponed_until <= now))
         ).order_by(
+            Application.is_priority.desc(),
             Application.submitted_at.asc()
         )
         result = await session.execute(stmt)
@@ -841,7 +842,7 @@ async def get_applications_by_fio_and_queue(fio: str, queue_type: str):
         stmt = select(Application).where(
             Application.fio.ilike(f"%{fio}%"),
             Application.queue_type == queue_type
-        ).options(selectinload(Application.epgu_processor)).order_by(Application.submitted_at.asc())
+        ).options(selectinload(Application.epgu_processor)).order_by(Application.is_priority.desc(), Application.submitted_at.asc())
         result = await session.execute(stmt)
         return result.scalars().all()
 

@@ -207,3 +207,17 @@ async def parse_1c_applications_from_excel(file_path: str, progress_callback=Non
         "epgu": epgu_applications,
         "unknown": unknown_applications
     } 
+
+def parse_epgu_mail_applications_from_excel(file_path: str):
+    """
+    Парсит excel-файл очереди ЕПГУ почта с колонками N, Физическое лицо, Email
+    Возвращает список словарей с fio и email
+    """
+    df = pd.read_excel(file_path)
+    filtered = []
+    for _, row in df.iterrows():
+        fio = str(row.get("Физическое лицо", "")).strip()
+        email = str(row.get("Email", "")).strip()
+        if fio and email and email != 'nan':
+            filtered.append({"fio": fio, "email": email})
+    return filtered 

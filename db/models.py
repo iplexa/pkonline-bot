@@ -33,6 +33,7 @@ class Application(Base):
     __tablename__ = "applications"
     id = Column(Integer, primary_key=True)
     fio = Column(String, nullable=False)
+    email = Column(String, nullable=True)  # Новый email для поиска и импорта
     submitted_at = Column(DateTime, nullable=False)
     is_priority = Column(Boolean, default=False)
     status = Column(Enum(ApplicationStatusEnum), default=ApplicationStatusEnum.QUEUED)

@@ -5,13 +5,14 @@ from datetime import datetime, timedelta, date
 from .session import get_session
 import aiohttp
 import tempfile
-from utils.excel import parse_lk_applications_from_excel, parse_epgu_applications_from_excel, parse_1c_applications_from_excel
+from utils.excel import parse_lk_applications_from_excel, parse_epgu_applications_from_excel, parse_1c_applications_from_excel, parse_epgu_mail_applications_from_excel
 import pytz
 import logging
 import pandas as pd
 import subprocess
 import os
 from urllib.parse import urlparse
+from utils.logger import get_logger
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -1464,3 +1465,55 @@ async def import_1c_applications_from_excel(file_path, progress_callback=None):
         logger.info(f"Импорт завершен: ЕПГУ добавлено={epgu_added}, обновлено={epgu_updated}, пропущено={epgu_skipped}")
         logger.info(f"Импорт завершен: UNKNOWN добавлено={unknown_added}, обновлено={unknown_updated}, пропущено={unknown_skipped}")
     return results 
+
+async def import_epgu_mail_applications_from_excel(file_path, employee_name: str, progress_callback=None):
+    from db.models import Application, ApplicationStatusEnum
+    from sqlalchemy.future import select
+    from db.session import get_session
+    import datetime
+    logger = get_logger()
+    data = parse_epgu_mail_applications_from_excel(file_path)
+    added = 0
+    moved = 0
+    skipped = 0
+    async for session in get_session():
+        for item in data:
+            fio = item.get("fio")
+            email = item.get("email")
+            if not email:
+                skipped += 1
+                continue
+            # Найти заявление в epgu с этим email
+            result = await session.execute(
+                select(Application).where(
+                    Application.queue_type == "epgu",
+                    Application.email == email
+                )
+            )
+            app = result.scalars().first()
+            if app:
+                app.queue_type = "epgu_mail"
+                await session.commit()
+                moved += 1
+                if logger:
+                    await logger.log_epgu_mail_queue(employee_name, app.id, app.fio, "Перенос из epgu по email")
+                continue
+            # Если не найдено — создать новое
+            new_app = Application(
+                fio=fio,
+                email=email,
+                submitted_at=datetime.datetime.now(),
+                queue_type="epgu_mail",
+                status=ApplicationStatusEnum.QUEUED
+            )
+            session.add(new_app)
+            await session.commit()
+            added += 1
+            if logger:
+                await logger.log_epgu_mail_queue(employee_name, new_app.id, fio, "Создано новое по email")
+        if progress_callback:
+            try:
+                await progress_callback(f"Добавлено новых: {added}, перенесено: {moved}, пропущено: {skipped}")
+            except:
+                pass
+    return {"added": added, "moved": moved, "skipped": skipped, "total": len(data)} 

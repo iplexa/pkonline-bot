@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from db.crud import (
     add_employee, remove_employee, add_group_to_employee, remove_group_from_employee, list_employees_with_groups, is_admin, get_employee_by_tg_id, get_applications_by_queue_type, clear_queue_by_type, import_applications_from_excel, import_1c_applications_from_excel, get_all_work_days_report,
     get_applications_statistics_by_queue, search_applications_by_fio, update_application_field, delete_application, get_all_employees, export_overdue_mail_applications_to_excel, create_database_backup,
-    update_employee_fio, get_employee_by_id, admin_start_work_day, admin_end_work_day, clear_work_time_data
+    update_employee_fio, get_employee_by_id, admin_start_work_day, admin_end_work_day, clear_work_time_data, import_epgu_mail_applications_from_excel
 )
 from keyboards.admin import admin_main_menu_keyboard, admin_staff_menu_keyboard, admin_queue_menu_keyboard, admin_queue_type_keyboard, admin_queue_pagination_keyboard, group_choice_keyboard, admin_reports_menu_keyboard, admin_search_applications_keyboard, admin_application_edit_keyboard, admin_queue_choice_keyboard, admin_status_choice_keyboard, admin_problem_status_choice_keyboard, admin_cancel_keyboard, admin_chat_settings_keyboard, admin_thread_settings_keyboard, admin_employee_selection_keyboard, admin_work_time_management_keyboard
 from keyboards.main import main_menu_keyboard
@@ -394,13 +394,30 @@ async def admin_upload_queue_file(message: Message, state: FSMContext):
                 )
             except Exception:
                 pass  # Игнорируем ошибки обновления
-        
+        if queue_type == "epgu_mail":
+            from db.crud import import_epgu_mail_applications_from_excel
+            from db.crud import get_employee_by_tg_id
+            emp = await get_employee_by_tg_id(str(message.from_user.id))
+            employee_name = emp.fio if emp else str(message.from_user.id)
+            result = await import_epgu_mail_applications_from_excel(tmp_path, employee_name, update_progress_message)
+            os.unlink(tmp_path)
+            added = result.get('added', '?')
+            moved = result.get('moved', '?')
+            skipped = result.get('skipped', '?')
+            total = result.get('total', '?')
+            await progress_msg.edit_text(
+                f"Импорт завершён для очереди: {queue_type}.\n"
+                f"Всего строк: {total}\n"
+                f"Добавлено новых: {added}\n"
+                f"Перенесено из epgu: {moved}\n"
+                f"Пропущено: {skipped}",
+                reply_markup=admin_queue_menu_keyboard()
+            )
+            await state.clear()
+            return
         from db.crud import import_applications_from_excel
         result = await import_applications_from_excel(tmp_path, queue_type, update_progress_message)
         os.unlink(tmp_path)
-        # result может быть None, но мы можем получить данные из логов, либо возвращать из функции
-        # Для пользователя выводим сколько добавлено, пропущено, всего строк
-        # Для этого возвращаем из import_applications_from_excel кортеж (added, skipped, total)
         if isinstance(result, dict):
             added = result.get('added', '?')
             skipped = result.get('skipped', '?')
@@ -409,14 +426,11 @@ async def admin_upload_queue_file(message: Message, state: FSMContext):
             added, skipped, total = result
         else:
             added = skipped = total = '?'
-        
-        # Логируем обновление очереди
         telegram_logger = get_logger()
         if telegram_logger and added and added != '?' and int(added) > 0:
             emp = await get_employee_by_tg_id(str(message.from_user.id))
             if emp:
                 await telegram_logger.log_queue_updated(queue_type, emp.fio, int(added))
-        
         await progress_msg.edit_text(
             f"Импорт завершён для очереди: {queue_type}.\n"
             f"Всего строк: {total}\n"

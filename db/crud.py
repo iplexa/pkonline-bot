@@ -1517,3 +1517,12 @@ async def import_epgu_mail_applications_from_excel(file_path, employee_name: str
             except:
                 pass
     return {"added": added, "moved": moved, "skipped": skipped, "total": len(data)} 
+
+async def get_applications_by_email_and_queue(email: str, queue_type: str):
+    async for session in get_session():
+        stmt = select(Application).where(
+            Application.email.ilike(f"%{email}%"),
+            Application.queue_type == queue_type
+        ).options(selectinload(Application.processed_by)).order_by(Application.is_priority.desc(), Application.submitted_at.asc())
+        result = await session.execute(stmt)
+        return result.scalars().all() 

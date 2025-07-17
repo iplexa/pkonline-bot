@@ -11,7 +11,8 @@ from db.crud import (
     increment_processed_applications,
     update_application_field,
     return_application_to_queue,
-    get_application_by_id
+    get_application_by_id,
+    get_applications_by_email_and_queue
 )
 from db.models import ApplicationStatusEnum
 from keyboards.mail import mail_menu_keyboard, mail_search_keyboard, mail_confirm_keyboard, mail_fio_search_keyboard
@@ -56,77 +57,28 @@ async def mail_search_fio_start(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(MailStates.waiting_fio_search)
     await callback.message.edit_text(
-        "Введите ФИО заявителя для поиска заявления в очереди почты:",
-        reply_markup=mail_search_keyboard()
+        "Введите ФИО <b>или email</b> заявителя для поиска заявления в очереди почты:",
+        reply_markup=mail_search_keyboard(),
+        parse_mode="HTML"
     )
 
 @router.message(MailStates.waiting_fio_search)
 async def mail_search_fio_process(message: Message, state: FSMContext):
-    emp = await get_employee_by_tg_id(str(message.from_user.id))
-    if not emp or not await has_access(str(message.from_user.id), "mail"):
-        return
     fio = message.text.strip()
-    if not fio:
-        await message.answer("Пожалуйста, введите ФИО заявителя.")
-        return
-    all_applications = await get_applications_by_fio_and_queue(fio, "epgu_mail")
-    if not all_applications:
-        # Пробуем найти похожие ФИО (по подстроке, нечувствительно к регистру)
-        similar_apps = await get_applications_by_fio_and_queue(fio[:3], "epgu_mail") if len(fio) >= 3 else []
-        if similar_apps:
-            unique_fios = sorted(set(app.fio for app in similar_apps))
-            text = f"Заявления для '{fio}' не найдены. Возможно, вы имели в виду:\n" + '\n'.join(unique_fios)
-            await message.answer(text, reply_markup=mail_menu_keyboard())
-        else:
-            await message.answer(
-                f"Заявления для '{fio}' в очереди почты не найдены.",
-                reply_markup=mail_menu_keyboard()
-            )
-        await state.clear()
-        return
-    # Фильтруем только неподтвержденные заявления
-    applications = [app for app in all_applications if app.status != ApplicationStatusEnum.ACCEPTED]
-    if not applications:
-        await message.answer(
-            f"У заявителя '{fio}' все заявления уже подтверждены. Повторное подтверждение не требуется.",
-            reply_markup=mail_menu_keyboard()
-        )
-        await state.clear()
-        return
-    if len(applications) == 1:
-        app = applications[0]
-        await state.update_data(app_id=app.id, fio=fio)
-        await state.set_state(MailStates.waiting_confirm)
-        # Формируем подробное описание
-        doc_list = []
-        if getattr(app, 'needs_signature', False):
-            doc_list.append("Подпись")
-        if getattr(app, 'needs_scans', False):
-            doc_list.append("Сканы")
-        doc_text = ", ".join(doc_list) if doc_list else "-"
-        epgu_operator = getattr(app, 'epgu_processor', None)
-        epgu_fio = epgu_operator.fio if epgu_operator and hasattr(epgu_operator, 'fio') else "-"
-        await message.answer(
-            f"📋 Найдено заявление:\n\n"
-            f"ФИО: {app.fio}\n"
-            f"Дата подачи: {app.submitted_at.strftime('%d.%m.%Y %H:%M')}\n"
-            f"ID: {app.id}\n"
-            f"Нужно подтвердить: {doc_text}\n"
-            f"Обработал в ЕПГУ: {epgu_fio}\n\n"
-            f"Подтвердите, что все необходимые документы в наличии:",
-            reply_markup=mail_confirm_keyboard()
-        )
+    if "@" in fio and "." in fio:
+        apps = await get_applications_by_email_and_queue(fio, "epgu_mail")
+        search_type = "email"
     else:
-        # Несколько заявлений - показываем кнопки для выбора
-        text = f"📋 Найдено {len(applications)} заявлений для '{fio}':\n\nВыберите нужное заявление:"
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text=f"{i+1}. {app.submitted_at.strftime('%d.%m.%Y %H:%M')}", callback_data=f"mail_select_{app.id}")]
-                for i, app in enumerate(applications)
-            ] + [[InlineKeyboardButton(text="🔙 Назад", callback_data="mail_back_to_menu")]]
-        )
-        await state.update_data(applications=[{"id": app.id, "fio": app.fio, "submitted_at": app.submitted_at.strftime('%d.%m.%Y %H:%M')} for app in applications], fio=fio)
-        await message.answer(text, reply_markup=keyboard)
+        apps = await get_applications_by_fio_and_queue(fio, "epgu_mail")
+        search_type = "ФИО"
+    if not apps:
+        await message.answer(f"Заявления для '{fio}' в очереди почты не найдены.")
+        return
+    text = f"Найдено заявлений: {len(apps)}\n\n"
+    for app in apps:
+        text += f"<b>{app.fio}</b> | {app.email or '-'} | {app.submitted_at.strftime('%Y-%m-%d %H:%M')} | {app.status.value}\n"
+    text += f"\n🔍 <b>Поисковый запрос:</b> '{fio}' ({search_type})\n"
+    await message.answer(text, parse_mode="HTML", reply_markup=mail_fio_search_keyboard())
 
 @router.callback_query(F.data.startswith("mail_select_"))
 async def mail_select_callback(callback: CallbackQuery, state: FSMContext):

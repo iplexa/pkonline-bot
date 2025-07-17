@@ -56,6 +56,7 @@ def admin_queue_type_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="ЛК", callback_data="admin_queue_type_lk")],
         [InlineKeyboardButton(text="ЕПГУ", callback_data="admin_queue_type_epgu")],
+        [InlineKeyboardButton(text="ЕПГУ (почта)", callback_data="admin_queue_type_epgu_mail")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_queue_menu")]
     ])
 

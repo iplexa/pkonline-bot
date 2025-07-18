@@ -14,6 +14,12 @@ const Dashboard = () => {
     const [error, setError] = useState(null);
     const [selectedQueue, setSelectedQueue] = useState(null);
     const [queueApplications, setQueueApplications] = useState([]);
+    const [showReport, setShowReport] = useState(false);
+    const [reportData, setReportData] = useState(null);
+    const [reportLoading, setReportLoading] = useState(false);
+    const [reportError, setReportError] = useState(null);
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [selectedReportDate, setSelectedReportDate] = useState('');
 
     useEffect(() => {
         if (isAuthenticated) {
@@ -66,6 +72,48 @@ const Dashboard = () => {
 
     const handleLogout = () => {
         logout();
+    };
+
+    const fetchFullReport = async (date = null) => {
+        setReportLoading(true);
+        setReportError(null);
+        try {
+            let url = '/dashboard/full_report';
+            if (date) {
+                url += `?date=${date}`;
+            }
+            const response = await axios.get(url);
+            setReportData(response.data);
+            setShowReport(true);
+        } catch (err) {
+            setReportError('Ошибка загрузки отчета');
+        } finally {
+            setReportLoading(false);
+        }
+    };
+
+    const handleTodayReport = () => {
+        fetchFullReport();
+    };
+
+    const handleDateReport = () => {
+        setShowDatePicker(true);
+    };
+
+    const handleDateChange = (e) => {
+        setSelectedReportDate(e.target.value);
+    };
+
+    const handleDateSubmit = () => {
+        if (selectedReportDate) {
+            fetchFullReport(selectedReportDate);
+            setShowDatePicker(false);
+        }
+    };
+
+    const closeReport = () => {
+        setShowReport(false);
+        setReportData(null);
     };
 
     if (loading) {
@@ -164,6 +212,95 @@ const Dashboard = () => {
                 </div>
             </div>
             
+            {/* Кнопки отчетности */}
+            <div className="mb-4 d-flex gap-2">
+                <button className="btn btn-primary" onClick={handleTodayReport}>
+                    📊 Полный отчет за сегодня
+                </button>
+                <button className="btn btn-outline-primary" onClick={handleDateReport}>
+                    📅 Выбрать дату для отчета
+                </button>
+                {showDatePicker && (
+                    <div className="ms-3 d-flex align-items-center gap-2">
+                        <input type="date" value={selectedReportDate} onChange={handleDateChange} className="form-control" style={{maxWidth: 180}} />
+                        <button className="btn btn-success btn-sm" onClick={handleDateSubmit}>Показать</button>
+                        <button className="btn btn-secondary btn-sm" onClick={() => setShowDatePicker(false)}>Отмена</button>
+                    </div>
+                )}
+            </div>
+
+            {/* Модальное окно/блок для отчета */}
+            {showReport && (
+                <div className="modal show d-block" tabIndex="-1" role="dialog" style={{background: 'rgba(0,0,0,0.2)'}}>
+                    <div className="modal-dialog modal-xl" role="document">
+                        <div className="modal-content">
+                            <div className="modal-header">
+                                <h5 className="modal-title">Полный отчет</h5>
+                                <button type="button" className="btn-close" onClick={closeReport}></button>
+                            </div>
+                            <div className="modal-body">
+                                {reportLoading ? (
+                                    <div className="text-center p-4">
+                                        <div className="spinner-border text-primary" role="status">
+                                            <span className="visually-hidden">Загрузка...</span>
+                                        </div>
+                                    </div>
+                                ) : reportError ? (
+                                    <div className="alert alert-danger">{reportError}</div>
+                                ) : reportData && reportData.length > 0 ? (
+                                    <div className="table-responsive">
+                                        <table className="table table-bordered">
+                                            <thead>
+                                                <tr>
+                                                    <th>Сотрудник</th>
+                                                    <th>Начало</th>
+                                                    <th>Окончание</th>
+                                                    <th>Время работы</th>
+                                                    <th>Время перерывов</th>
+                                                    <th>Заявлений</th>
+                                                    <th>Перерывы</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {reportData.map((r, idx) => (
+                                                    <tr key={idx}>
+                                                        <td>{r.employee_fio}</td>
+                                                        <td>{r.start_time ? new Date(r.start_time).toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}) : '-'}</td>
+                                                        <td>{r.end_time ? new Date(r.end_time).toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}) : '-'}</td>
+                                                        <td>{r.total_work_time != null ? `${Math.floor(r.total_work_time/3600).toString().padStart(2,'0')}:${Math.floor((r.total_work_time%3600)/60).toString().padStart(2,'0')}` : '-'}</td>
+                                                        <td>{r.total_break_time != null ? `${Math.floor(r.total_break_time/3600).toString().padStart(2,'0')}:${Math.floor((r.total_break_time%3600)/60).toString().padStart(2,'0')}` : '-'}</td>
+                                                        <td>{r.applications_processed}</td>
+                                                        <td>
+                                                            {r.breaks && r.breaks.length > 0 ? (
+                                                                <ul className="mb-0 ps-3">
+                                                                    {r.breaks.map((b, i) => (
+                                                                        <li key={i}>
+                                                                            {b.start_time ? new Date(b.start_time).toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}) : '-'}
+                                                                            {' - '}
+                                                                            {b.end_time ? new Date(b.end_time).toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}) : 'активен'}
+                                                                            {b.duration ? ` (${Math.floor(b.duration/60)} мин)` : ''}
+                                                                        </li>
+                                                                    ))}
+                                                                </ul>
+                                                            ) : '—'}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ) : (
+                                    <div className="alert alert-info">Нет данных за выбранную дату</div>
+                                )}
+                            </div>
+                            <div className="modal-footer">
+                                <button type="button" className="btn btn-secondary" onClick={closeReport}>Закрыть</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="row">
                 <div className="col-md-6 mb-4">
                     <div className="card">

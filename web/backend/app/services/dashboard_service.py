@@ -368,4 +368,48 @@ class DashboardService:
             "labels": ["В очереди", "В обработке", "Завершено"],
             "data": [queued, in_progress, completed],
             "total": total
-        } 
+        }
+
+    def get_full_report_by_date(self, report_date: datetime.date = None) -> list:
+        """Получить полный отчет по всем сотрудникам за день (рабочее время, перерывы, заявления)"""
+        if not report_date:
+            report_date = get_moscow_date()
+        today_start = datetime.combine(report_date, datetime.min.time())
+        today_end = datetime.combine(report_date, datetime.max.time())
+        work_days = self.db.query(WorkDay).filter(
+            WorkDay.date >= today_start,
+            WorkDay.date <= today_end
+        ).all()
+        reports = []
+        for work_day in work_days:
+            # Пересчитываем время для активных дней
+            total_work_time = work_day.total_work_time
+            total_break_time = work_day.total_break_time
+            if work_day.status in [WorkDayStatusEnum.ACTIVE, WorkDayStatusEnum.PAUSED] and work_day.start_time and not work_day.end_time:
+                current_time = get_moscow_now()
+                # Проверяем активный перерыв
+                active_break = next((b for b in work_day.breaks if b.end_time is None), None)
+                if active_break and active_break.start_time:
+                    total_break_time += int((current_time - active_break.start_time).total_seconds())
+                elapsed_seconds = int((current_time - work_day.start_time).total_seconds())
+                total_work_time = elapsed_seconds - total_break_time
+            report = {
+                "employee_fio": work_day.employee.fio if work_day.employee else None,
+                "employee_tg_id": work_day.employee.tg_id if work_day.employee else None,
+                "date": work_day.date.date() if work_day.date else None,
+                "start_time": work_day.start_time,
+                "end_time": work_day.end_time,
+                "total_work_time": total_work_time,
+                "total_break_time": total_break_time,
+                "applications_processed": work_day.applications_processed,
+                "status": work_day.status.value,
+                "breaks": [
+                    {
+                        "start_time": b.start_time,
+                        "end_time": b.end_time,
+                        "duration": b.duration
+                    } for b in getattr(work_day, 'breaks', [])
+                ]
+            }
+            reports.append(report)
+        return reports 

@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
 from app.services.dashboard_service import DashboardService
 from app.auth import get_current_user
+from datetime import datetime
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -54,8 +55,6 @@ def get_queue_applications(
     service = DashboardService(db)
     return service.get_queue_applications(queue_type)
 
-
-
 @router.get("/charts/lk")
 def get_lk_chart(
     db: Session = Depends(get_db),
@@ -72,4 +71,20 @@ def get_epgu_chart(
 ):
     """Получить данные для круговой диаграммы ЕПГУ"""
     service = DashboardService(db)
-    return service.get_epgu_chart_data() 
+    return service.get_epgu_chart_data()
+
+@router.get("/full_report")
+def get_full_report(
+    date: str = Query(None, description="Дата отчета в формате YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Получить полный отчет по всем сотрудникам за выбранную дату (или за сегодня)"""
+    service = DashboardService(db)
+    report_date = None
+    if date:
+        try:
+            report_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Некорректный формат даты. Используйте YYYY-MM-DD.")
+    return service.get_full_report_by_date(report_date) 

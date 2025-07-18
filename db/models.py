@@ -74,6 +74,7 @@ class Employee(Base):
     tg_id = Column(String, unique=True, nullable=False)
     fio = Column(String, nullable=True)
     is_admin = Column(Boolean, default=False)
+    password = Column(String, nullable=True)  # Новый столбец для хранения пароля в открытом виде
     applications = relationship("Application", back_populates="processed_by", foreign_keys="Application.processed_by_id")
     groups = relationship("Group", secondary="employee_groups", back_populates="employees")
     work_days = relationship("WorkDay", back_populates="employee")

@@ -12,11 +12,16 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 class LoginRequest(BaseModel):
-    tg_id: str
+    fio: str
+    password: str
 
 class RegisterRequest(BaseModel):
     tg_id: str
     fio: str
+
+class SetPasswordRequest(BaseModel):
+    employee_id: int
+    new_password: str
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -30,27 +35,23 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 
 @router.post("/login")
 def login(request: LoginRequest, db: Session = Depends(get_db)):
-    """Вход в систему по Telegram ID"""
-    employee = db.query(Employee).filter(Employee.tg_id == request.tg_id).first()
-    
-    if not employee:
+    """Вход в систему по ФИО и паролю (plain)"""
+    employee = db.query(Employee).filter(Employee.fio == request.fio).first()
+    if not employee or employee.password != request.password:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный Telegram ID"
+            detail="Неверные ФИО или пароль"
         )
-    
     access_token_expires = timedelta(hours=24)
     access_token = create_access_token(
-        data={"sub": str(employee.tg_id)}, expires_delta=access_token_expires
+        data={"sub": str(employee.id)}, expires_delta=access_token_expires
     )
-    
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "user": {
             "id": employee.id,
             "fio": employee.fio,
-            "tg_id": employee.tg_id,
             "is_admin": employee.is_admin
         }
     }
@@ -88,4 +89,13 @@ def register_admin(request: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(employee)
     
-    return {"message": "Администратор успешно зарегистрирован", "employee_id": employee.id} 
+    return {"message": "Администратор успешно зарегистрирован", "employee_id": employee.id}
+
+@router.post("/set_password")
+def set_employee_password(request: SetPasswordRequest, db: Session = Depends(get_db), current_admin = Depends(get_current_admin_user)):
+    employee = db.query(Employee).filter(Employee.id == request.employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Сотрудник не найден")
+    employee.password = request.new_password
+    db.commit()
+    return {"message": f"Пароль для {employee.fio} обновлен"} 

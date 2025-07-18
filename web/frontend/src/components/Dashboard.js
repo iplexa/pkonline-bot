@@ -20,6 +20,12 @@ const Dashboard = () => {
     const [reportError, setReportError] = useState(null);
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [selectedReportDate, setSelectedReportDate] = useState('');
+    const [showSetPassword, setShowSetPassword] = useState(false);
+    const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [setPasswordLoading, setSetPasswordLoading] = useState(false);
+    const [setPasswordMessage, setSetPasswordMessage] = useState('');
+    const [setPasswordError, setSetPasswordError] = useState('');
 
     useEffect(() => {
         if (isAuthenticated) {
@@ -114,6 +120,35 @@ const Dashboard = () => {
     const closeReport = () => {
         setShowReport(false);
         setReportData(null);
+    };
+
+    const openSetPassword = () => {
+        setShowSetPassword(true);
+        setSelectedEmployeeId('');
+        setNewPassword('');
+        setSetPasswordMessage('');
+        setSetPasswordError('');
+    };
+
+    const closeSetPassword = () => {
+        setShowSetPassword(false);
+    };
+
+    const handleSetPassword = async () => {
+        setSetPasswordLoading(true);
+        setSetPasswordMessage('');
+        setSetPasswordError('');
+        try {
+            await axios.post('/auth/set_password', {
+                employee_id: selectedEmployeeId,
+                new_password: newPassword
+            });
+            setSetPasswordMessage('Пароль успешно обновлен');
+        } catch (err) {
+            setSetPasswordError(err.response?.data?.detail || 'Ошибка при смене пароля');
+        } finally {
+            setSetPasswordLoading(false);
+        }
     };
 
     if (loading) {
@@ -212,6 +247,50 @@ const Dashboard = () => {
                 </div>
             </div>
             
+            {user?.is_admin && (
+                <div className="mb-3">
+                    <button className="btn btn-warning" onClick={openSetPassword}>
+                        <i className="fas fa-key me-2"></i>Сменить пароль сотрудника
+                    </button>
+                </div>
+            )}
+
+            {showSetPassword && (
+                <div className="modal show d-block" tabIndex="-1" role="dialog" style={{background: 'rgba(0,0,0,0.2)'}}>
+                    <div className="modal-dialog" role="document">
+                        <div className="modal-content">
+                            <div className="modal-header">
+                                <h5 className="modal-title">Смена пароля сотрудника</h5>
+                                <button type="button" className="btn-close" onClick={closeSetPassword}></button>
+                            </div>
+                            <div className="modal-body">
+                                <div className="mb-3">
+                                    <label className="form-label">Сотрудник</label>
+                                    <select className="form-select" value={selectedEmployeeId} onChange={e => setSelectedEmployeeId(e.target.value)}>
+                                        <option value="">Выберите сотрудника</option>
+                                        {data.employees.map(emp => (
+                                            <option key={emp.id} value={emp.id}>{emp.fio}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="mb-3">
+                                    <label className="form-label">Новый пароль</label>
+                                    <input type="text" className="form-control" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+                                </div>
+                                {setPasswordMessage && <div className="alert alert-success">{setPasswordMessage}</div>}
+                                {setPasswordError && <div className="alert alert-danger">{setPasswordError}</div>}
+                            </div>
+                            <div className="modal-footer">
+                                <button type="button" className="btn btn-secondary" onClick={closeSetPassword}>Отмена</button>
+                                <button type="button" className="btn btn-primary" onClick={handleSetPassword} disabled={setPasswordLoading || !selectedEmployeeId || !newPassword}>
+                                    {setPasswordLoading ? 'Сохраняем...' : 'Сохранить'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Кнопки отчетности */}
             <div className="mb-4 d-flex gap-2">
                 <button className="btn btn-primary" onClick={handleTodayReport}>

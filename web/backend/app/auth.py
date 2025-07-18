@@ -35,11 +35,11 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
-    """Получить текущего пользователя из токена"""
+    """Получить текущего пользователя из токена (sub = id)"""
     try:
         payload = jwt.decode(credentials.credentials, settings.secret_key, algorithms=[settings.algorithm])
-        tg_id: str = payload.get("sub")
-        if tg_id is None:
+        user_id: str = payload.get("sub")
+        if user_id is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
@@ -51,8 +51,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    employee = db.query(Employee).filter(Employee.tg_id == tg_id).first()
+    employee = db.query(Employee).filter(Employee.id == int(user_id)).first()
     if employee is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

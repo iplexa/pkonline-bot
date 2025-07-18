@@ -43,23 +43,20 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const login = async (tgId) => {
+  const login = async (fio, password) => {
     try {
-      const response = await axios.post('/auth/login', { tg_id: tgId });
+      const response = await axios.post('/auth/login', { fio, password });
       const { access_token, user: userData } = response.data;
-      
       localStorage.setItem('token', access_token);
       axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
-      
       setUser(userData);
       setIsAuthenticated(true);
-      
       return { success: true };
     } catch (error) {
       console.error('Login error:', error);
-      return { 
-        success: false, 
-        error: error.response?.data?.detail || 'Ошибка входа в систему' 
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Ошибка входа в систему'
       };
     }
   };

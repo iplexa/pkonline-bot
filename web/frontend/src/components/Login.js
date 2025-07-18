@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
 const Login = () => {
-    const [tgId, setTgId] = useState('');
+    const [fio, setFio] = useState('');
+    const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const { login } = useAuth();
@@ -12,18 +13,16 @@ const Login = () => {
         setLoading(true);
         setError('');
 
-        if (!tgId.trim()) {
-            setError('Пожалуйста, введите Telegram ID');
+        if (!fio.trim() || !password) {
+            setError('Пожалуйста, введите ФИО и пароль');
             setLoading(false);
             return;
         }
 
-        const result = await login(tgId.trim());
-        
+        const result = await login(fio.trim(), password);
         if (!result.success) {
             setError(result.error);
         }
-        
         setLoading(false);
     };
 
@@ -40,25 +39,35 @@ const Login = () => {
                     </div>
 
                     <form onSubmit={handleSubmit} className="login-form">
-                        <div className="mb-4">
-                            <label htmlFor="tgId" className="form-label fw-semibold">
-                                <i className="fab fa-telegram me-2 text-primary"></i>
-                                Telegram ID
+                        <div className="mb-3">
+                            <label htmlFor="fio" className="form-label fw-semibold">
+                                <i className="fas fa-user me-2 text-primary"></i>
+                                ФИО
                             </label>
-                            <div className="input-group">
-                                <span className="input-group-text">
-                                    <i className="fas fa-user"></i>
-                                </span>
-                                <input
-                                    type="text"
-                                    className={`form-control ${error ? 'is-invalid' : ''}`}
-                                    id="tgId"
-                                    placeholder="Введите ваш Telegram ID"
-                                    value={tgId}
-                                    onChange={(e) => setTgId(e.target.value)}
-                                    disabled={loading}
-                                />
-                            </div>
+                            <input
+                                type="text"
+                                className={`form-control ${error ? 'is-invalid' : ''}`}
+                                id="fio"
+                                placeholder="Введите ваше ФИО"
+                                value={fio}
+                                onChange={(e) => setFio(e.target.value)}
+                                disabled={loading}
+                            />
+                        </div>
+                        <div className="mb-4">
+                            <label htmlFor="password" className="form-label fw-semibold">
+                                <i className="fas fa-lock me-2 text-primary"></i>
+                                Пароль
+                            </label>
+                            <input
+                                type="password"
+                                className={`form-control ${error ? 'is-invalid' : ''}`}
+                                id="password"
+                                placeholder="Введите пароль"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                disabled={loading}
+                            />
                             {error && (
                                 <div className="invalid-feedback d-block">
                                     <i className="fas fa-exclamation-triangle me-1"></i>

@@ -1275,10 +1275,18 @@ async def import_1c_applications_from_excel(file_path, progress_callback=None):
     Импорт заявлений из выгрузки 1С с проверкой изменений
     """
     from utils.excel import parse_1c_applications_from_excel
-    
-    # Парсим файл с callback для обновления прогресса
-    parsed_data = await parse_1c_applications_from_excel(file_path, progress_callback)
-    
+    from sqlalchemy.future import select
+    # Собираем все ФИО из всех очередей
+    existing_fios_by_queue = {}
+    async for session in get_session():
+        for queue in ["lk_problem", "epgu_mail", "epgu_problem", "epgu", "lk"]:
+            result = await session.execute(
+                select(Application.fio).where(Application.queue_type == queue)
+            )
+            existing_fios_by_queue[queue] = set(fio for (fio,) in result.fetchall())
+        break  # только один раз, не для каждой сессии
+    # Парсим файл с callback для обновления прогресса и фильтрацией по ФИО
+    parsed_data = await parse_1c_applications_from_excel(file_path, progress_callback, existing_fios_by_queue)
     logger = logging.getLogger("1c_import")
     logger.info(f"Импорт заявлений из 1С: ЛК={len(parsed_data['lk'])}, ЕПГУ={len(parsed_data['epgu'])}, UNKNOWN={len(parsed_data.get('unknown', []))}")
     

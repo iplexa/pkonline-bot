@@ -38,15 +38,13 @@ const Dashboard = () => {
     const fetchData = async () => {
         try {
             setLoading(true);
-            const [employeesRes, applicationsRes, statsRes] = await Promise.all([
+            const [employeesRes, statsRes] = await Promise.all([
                 axios.get('/dashboard/employees/status'),
-                axios.get('/dashboard/applications/recent'),
                 axios.get('/dashboard/queues/statistics')
             ]);
 
             setData({
                 employees: employeesRes.data,
-                recentApplications: applicationsRes.data,
                 queueStats: statsRes.data
             });
         } catch (err) {

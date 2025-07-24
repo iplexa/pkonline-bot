@@ -135,6 +135,11 @@ class TelegramLogger:
         message = f"⚠️ <b>ЕПГУ: Проблемное заявление</b>\n👤 {employee_name}\n📋 ID: {app_id}\n👨‍💼 {fio}\n📝 Причина: {reason}"
         return await self.log_to_thread("epgu_problem", message)
     
+    async def log_epgu_rejected(self, employee_name: str, app_id: int, fio: str, reason: str) -> bool:
+        """Логировать отклонение заявления ЕПГУ"""
+        message = f"❌ <b>ЕПГУ: Заявление отклонено</b>\n👤 {employee_name}\n📋 ID: {app_id}\n👨‍💼 {fio}\n📝 Причина: {reason}"
+        return await self.log_to_thread("epgu_accepted", message)
+    
     # Методы для логирования почты
     async def log_mail_confirmed(self, employee_name: str, fio: str) -> bool:
         """Логировать подтверждение почты"""

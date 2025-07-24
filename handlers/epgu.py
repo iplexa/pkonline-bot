@@ -81,7 +81,7 @@ async def get_epgu_application(callback: CallbackQuery, state: FSMContext):
     await state.set_state(EPGUStates.waiting_decision)
 
 @router.callback_query(EPGUStates.waiting_decision, F.data.in_([
-    "accept_epgu", "epgu_signature", "epgu_signature_scans", "epgu_scans", "epgu_error", "return_epgu"
+    "accept_epgu", "reject_epgu", "epgu_signature", "epgu_signature_scans", "epgu_scans", "epgu_error", "return_epgu"
 ]))
 async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
     emp = await get_employee_by_tg_id(str(callback.from_user.id))
@@ -113,6 +113,11 @@ async def process_epgu_decision(callback: CallbackQuery, state: FSMContext):
         await callback.bot.send_message(ADMIN_CHAT_ID, f"ЕПГУ: {callback.from_user.full_name} принял заявление {app_id}")
         await state.clear()
 
+    elif callback.data == "reject_epgu":
+        # Запросить причину отклонения
+        await state.set_state(EPGUStates.waiting_reason)
+        await state.update_data(decision="reject_epgu")
+        await callback.message.edit_text("Укажите причину отклонения:", reply_markup=epgu_reason_keyboard())
     elif callback.data == "epgu_signature":
         # Вариант 2: Есть сканы, отправляем на подпись (в очередь почты)
         await update_application_queue_type(app_id, "epgu_mail", employee_id=employee_id)
@@ -240,6 +245,23 @@ async def process_epgu_reason(message: Message, state: FSMContext):
                 await telegram_logger.log_epgu_problem(emp.fio, app_id, app.fio, reason)
         
         await message.bot.send_message(ADMIN_CHAT_ID, f"ЕПГУ: {message.from_user.full_name} пометил заявление {app_id} как проблемное. Причина: {reason}")
+        await state.clear()
+
+    elif decision == "reject_epgu":
+        # Отклонить заявление
+        await update_application_status(app_id, ApplicationStatusEnum.REJECTED, reason=reason, employee_id=employee_id)
+        await update_application_field(app_id, "epgu_action", EPGUActionEnum.REJECTED.value)
+        await update_application_field(app_id, "epgu_processor_id", employee_id)
+        result = await increment_processed_applications(employee_id)
+        logger.info(f"Заявление ЕПГУ отклонено: app_id={app_id}, increment_result={result}, reason={reason}")
+        await message.answer(f"Заявление отклонено. Причина: {reason}", reply_markup=epgu_decision_keyboard(menu=True))
+        # Логируем событие
+        telegram_logger = get_logger()
+        if telegram_logger:
+            app = await get_application_by_id(app_id)
+            if app:
+                await telegram_logger.log_epgu_rejected(emp.fio, app_id, app.fio, reason)
+        await message.bot.send_message(ADMIN_CHAT_ID, f"ЕПГУ: {message.from_user.full_name} отклонил заявление {app_id}. Причина: {reason}")
         await state.clear()
 
 @router.callback_query(EPGUStates.waiting_decision, F.data == "main_menu")

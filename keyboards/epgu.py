@@ -21,6 +21,7 @@ def epgu_decision_keyboard(menu: bool = True) -> InlineKeyboardMarkup:
     else:
         return InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Принято", callback_data="accept_epgu")],
+            [InlineKeyboardButton(text="❌ Отклонить", callback_data="reject_epgu")],
             [InlineKeyboardButton(text="📄 Есть сканы, на подпись", callback_data="epgu_signature")],
             [InlineKeyboardButton(text="❗ Нет сканов, на подпись и запрос сканов", callback_data="epgu_signature_scans")],
             [InlineKeyboardButton(text="📥 Нет сканов, только сканы (без подписи)", callback_data="epgu_scans")],

@@ -28,6 +28,7 @@ class EPGUActionEnum(enum.Enum):
     NO_SCANS = "NO_SCANS"  # Нет сканов, отправляем на подпись и запрашиваем сканы
     ONLY_SCANS = "ONLY_SCANS"  # Нет сканов, подпись не требуется, ждем только сканы
     ERROR = "ERROR"  # Ошибка
+    REJECTED = "REJECTED"  # Отклонено
 
 class Application(Base):
     __tablename__ = "applications"

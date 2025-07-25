@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { Modal, Button, Form } from 'react-bootstrap';
 
 const QueueViewer = () => {
     const [selectedQueue, setSelectedQueue] = useState('lk');
@@ -7,6 +8,14 @@ const QueueViewer = () => {
     const [applications, setApplications] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const [showModal, setShowModal] = useState(false);
+    const [modalType, setModalType] = useState(null);
+    const [modalApp, setModalApp] = useState(null);
+    const [modalReason, setModalReason] = useState('');
+    const [actionLoading, setActionLoading] = useState(false);
+    const [searchMode, setSearchMode] = useState(false);
+    const [searchResults, setSearchResults] = useState([]);
+    const [searchLoading, setSearchLoading] = useState(false);
 
     const queueTypes = [
         { value: 'lk', name: 'Личный кабинет', icon: 'fas fa-user' },
@@ -23,6 +32,66 @@ const QueueViewer = () => {
         { value: 'rejected', name: 'Отклонено', icon: 'fas fa-times' },
         { value: 'problem', name: 'Проблема', icon: 'fas fa-exclamation-triangle' }
     ];
+
+    const handleAction = (app, action) => {
+        setModalApp(app);
+        setModalType(action);
+        setShowModal(true);
+        setModalReason('');
+    };
+    const handleModalClose = () => {
+        setShowModal(false);
+        setModalType(null);
+        setModalApp(null);
+        setModalReason('');
+    };
+    const processApplication = async () => {
+        if (!modalApp) return;
+        setActionLoading(true);
+        try {
+            await axios.patch(`/dashboard/applications/${modalApp.id}/process`, {
+                action: modalType,
+                reason: modalType === 'reject' || modalType === 'to_problem' ? modalReason : undefined
+            });
+            setShowModal(false);
+            fetchApplications();
+        } catch (e) {
+            alert('Ошибка обработки: ' + (e.response?.data?.detail || e.message));
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const handleTakeNext = async () => {
+        setActionLoading(true);
+        try {
+            await axios.post(`/dashboard/queues/${selectedQueue}/next`);
+            fetchApplications();
+        } catch (e) {
+            alert('Нет доступных заявлений или ошибка: ' + (e.response?.data?.detail || e.message));
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const handleSearch = async () => {
+        if (!searchTerm) return;
+        setSearchLoading(true);
+        setSearchMode(true);
+        try {
+            const res = await axios.get(`/dashboard/queues/${selectedQueue}/search`, { params: { fio: searchTerm } });
+            setSearchResults(res.data);
+        } catch (e) {
+            alert('Ошибка поиска: ' + (e.response?.data?.detail || e.message));
+        } finally {
+            setSearchLoading(false);
+        }
+    };
+
+    const handleClearSearch = () => {
+        setSearchMode(false);
+        setSearchResults([]);
+    };
 
     const fetchApplications = async () => {
         try {
@@ -138,13 +207,30 @@ const QueueViewer = () => {
                         </div>
                         <div className="col-md-6 d-flex align-items-end">
                             <button 
-                                className="btn btn-outline-primary"
+                                className="btn btn-outline-primary me-2"
                                 onClick={fetchApplications}
                                 disabled={loading}
                             >
                                 <i className={`fas fa-sync-alt ${loading ? 'fa-spin' : ''}`}></i>
                                 Обновить
                             </button>
+                            <button
+                                className="btn btn-success me-2"
+                                onClick={handleTakeNext}
+                                disabled={actionLoading}
+                            >
+                                <i className="fas fa-hand-paper"></i> Взять заявление
+                            </button>
+                            <button
+                                className="btn btn-info"
+                                onClick={handleSearch}
+                                disabled={searchLoading || !searchTerm}
+                            >
+                                <i className="fas fa-search"></i> Поиск
+                            </button>
+                            {searchMode && (
+                                <button className="btn btn-secondary ms-2" onClick={handleClearSearch}>Сбросить</button>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -155,7 +241,7 @@ const QueueViewer = () => {
                 <div className="card-header bg-light">
                     <div className="d-flex justify-content-between align-items-center">
                         <h6 className="mb-0">
-                            Заявления в очереди: {filteredApplications.length}
+                            {searchMode ? `Результаты поиска: ${searchResults.length}` : `Заявления в очереди: ${filteredApplications.length}`}
                         </h6>
                         <small className="text-muted">
                             Всего в очереди: {applications.length}
@@ -163,13 +249,13 @@ const QueueViewer = () => {
                     </div>
                 </div>
                 <div className="card-body p-0">
-                    {loading ? (
+                    {loading || searchLoading ? (
                         <div className="p-4 text-center">
                             <div className="spinner-border text-primary" role="status">
                                 <span className="visually-hidden">Загрузка...</span>
                             </div>
                         </div>
-                    ) : filteredApplications.length === 0 ? (
+                    ) : (searchMode ? searchResults : filteredApplications).length === 0 ? (
                         <div className="p-4 text-center text-muted">
                             <i className="fas fa-inbox fa-3x mb-3"></i>
                             <p>Нет заявлений в выбранной очереди</p>
@@ -188,7 +274,7 @@ const QueueViewer = () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {filteredApplications.map((app) => (
+                                    {(searchMode ? searchResults : filteredApplications).map((app) => (
                                         <tr key={app.id}>
                                             <td>
                                                 <span className="fw-bold text-primary">#{app.id}</span>
@@ -221,6 +307,25 @@ const QueueViewer = () => {
                                                 </div>
                                             </td>
                                             <td>
+                                                {/* Кнопки действий для ЕПГУ и Почты */}
+                                                {['epgu', 'epgu_mail'].includes(app.queue_type) && app.status === 'queued' && (
+                                                    <>
+                                                        <button className="btn btn-sm btn-success me-1" title="Принять" onClick={() => handleAction(app, 'accept')}><i className="fas fa-check"></i></button>
+                                                        <button className="btn btn-sm btn-danger me-1" title="Отклонить" onClick={() => handleAction(app, 'reject')}><i className="fas fa-times"></i></button>
+                                                        {app.queue_type === 'epgu' && (
+                                                            <>
+                                                                <button className="btn btn-sm btn-warning me-1" title="На подпись (почта)" onClick={() => handleAction(app, 'to_mail')}><i className="fas fa-envelope"></i></button>
+                                                                <button className="btn btn-sm btn-secondary me-1" title="Проблемное" onClick={() => handleAction(app, 'to_problem')}><i className="fas fa-exclamation-triangle"></i></button>
+                                                            </>
+                                                        )}
+                                                        {app.queue_type === 'epgu_mail' && (
+                                                            <>
+                                                                <button className="btn btn-sm btn-info me-1" title="Подтвердить сканы" onClick={() => handleAction(app, 'confirm_scans')}><i className="fas fa-file-alt"></i></button>
+                                                                <button className="btn btn-sm btn-primary me-1" title="Подтвердить подпись" onClick={() => handleAction(app, 'confirm_signature')}><i className="fas fa-pen"></i></button>
+                                                            </>
+                                                        )}
+                                                    </>
+                                                )}
                                                 <button 
                                                     className="btn btn-sm btn-outline-info"
                                                     title="Подробности"
@@ -236,6 +341,42 @@ const QueueViewer = () => {
                     )}
                 </div>
             </div>
+
+            {/* Модальное окно для подтверждения действия или ввода причины */}
+            <Modal show={showModal} onHide={handleModalClose} centered>
+                <Modal.Header closeButton>
+                    <Modal.Title>
+                        {modalType === 'accept' && 'Подтвердить принятие заявления?'}
+                        {modalType === 'reject' && 'Отклонить заявление'}
+                        {modalType === 'to_mail' && 'Отправить на подпись (почта)?'}
+                        {modalType === 'to_problem' && 'Перевести в проблемные'}
+                        {modalType === 'confirm_scans' && 'Подтвердить сканы?'}
+                        {modalType === 'confirm_signature' && 'Подтвердить подпись?'}
+                    </Modal.Title>
+                </Modal.Header>
+                <Modal.Body>
+                    {(modalType === 'reject' || modalType === 'to_problem') ? (
+                        <Form.Group>
+                            <Form.Label>Укажите причину:</Form.Label>
+                            <Form.Control
+                                as="textarea"
+                                rows={2}
+                                value={modalReason}
+                                onChange={e => setModalReason(e.target.value)}
+                                disabled={actionLoading}
+                            />
+                        </Form.Group>
+                    ) : (
+                        <p>Вы уверены, что хотите выполнить это действие?</p>
+                    )}
+                </Modal.Body>
+                <Modal.Footer>
+                    <Button variant="secondary" onClick={handleModalClose} disabled={actionLoading}>Отмена</Button>
+                    <Button variant="primary" onClick={processApplication} disabled={actionLoading || ((modalType === 'reject' || modalType === 'to_problem') && !modalReason)}>
+                        {actionLoading ? 'Выполняется...' : 'Подтвердить'}
+                    </Button>
+                </Modal.Footer>
+            </Modal>
         </div>
     );
 };

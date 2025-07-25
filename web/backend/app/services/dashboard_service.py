@@ -413,3 +413,96 @@ class DashboardService:
             }
             reports.append(report)
         return reports 
+
+    def accept_application(self, app, employee_id):
+        app.status = ApplicationStatusEnum.ACCEPTED
+        app.processed_by_id = employee_id
+        app.processed_at = get_moscow_now()
+        # Для ЕПГУ: epgu_action, epgu_processor_id
+        if hasattr(app, 'epgu_action'):
+            app.epgu_action = 'ACCEPTED'
+            app.epgu_processor_id = employee_id
+        app.scans_confirmed = True
+        app.signature_confirmed = True
+
+    def reject_application(self, app, employee_id, reason):
+        app.status = ApplicationStatusEnum.REJECTED
+        app.status_reason = reason
+        app.processed_by_id = employee_id
+        app.processed_at = get_moscow_now()
+        if hasattr(app, 'epgu_action'):
+            app.epgu_action = 'REJECTED'
+            app.epgu_processor_id = employee_id
+
+    def move_to_mail_queue(self, app, employee_id):
+        app.queue_type = 'epgu_mail'
+        app.status = ApplicationStatusEnum.QUEUED
+        app.processed_by_id = employee_id
+        app.processed_at = get_moscow_now()
+        app.epgu_action = 'HAS_SCANS'
+        app.epgu_processor_id = employee_id
+        app.needs_scans = False
+        app.needs_signature = True
+        app.scans_confirmed = True
+        app.signature_confirmed = False
+        app.taken_at = None
+
+    def move_to_problem_queue(self, app, employee_id, reason):
+        app.status = ApplicationStatusEnum.PROBLEM
+        app.status_reason = reason
+        app.queue_type = app.queue_type + '_problem' if not app.queue_type.endswith('_problem') else app.queue_type
+        app.processed_by_id = employee_id
+        app.processed_at = get_moscow_now()
+
+    def confirm_scans(self, app, employee_id):
+        app.scans_confirmed = True
+        # Если нужна подпись и не подтверждена — не принимаем
+        if getattr(app, 'needs_signature', False) and not getattr(app, 'signature_confirmed', False):
+            return
+        # Если всё подтверждено — принять
+        self.accept_application(app, employee_id)
+
+    def confirm_signature(self, app, employee_id):
+        app.signature_confirmed = True
+        # Если нужны сканы и не подтверждены — не принимаем
+        if getattr(app, 'needs_scans', False) and not getattr(app, 'scans_confirmed', False):
+            return
+        # Если всё подтверждено — принять
+        self.accept_application(app, employee_id) 
+
+    def assign_next_application(self, queue_type, employee_id):
+        # Аналогично get_next_application из crud.py
+        app = self.db.query(Application).filter(
+            Application.queue_type == queue_type,
+            Application.status == ApplicationStatusEnum.QUEUED
+        ).order_by(
+            Application.is_priority.desc(),
+            Application.submitted_at.asc()
+        ).first()
+        if app:
+            app.status = ApplicationStatusEnum.IN_PROGRESS
+            app.processed_by_id = employee_id
+            app.taken_at = get_moscow_now()
+            self.db.commit()
+        return app
+
+    def search_applications(self, queue_type, fio_or_email):
+        # Для epgu_mail поддерживаем поиск по email
+        q = self.db.query(Application).filter(Application.queue_type == queue_type)
+        if queue_type == 'epgu_mail' and ('@' in fio_or_email and '.' in fio_or_email):
+            q = q.filter(Application.email.ilike(f"%{fio_or_email}%"))
+        else:
+            q = q.filter(Application.fio.ilike(f"%{fio_or_email}%"))
+        return [
+            {
+                "id": app.id,
+                "fio": app.fio,
+                "queue_type": app.queue_type,
+                "status": app.status.value,
+                "submitted_at": app.submitted_at,
+                "processed_at": app.processed_at,
+                "processed_by_fio": app.processed_by.fio if app.processed_by else None,
+                "is_priority": app.is_priority if hasattr(app, 'is_priority') else False
+            }
+            for app in q.order_by(Application.submitted_at.desc()).all()
+        ] 

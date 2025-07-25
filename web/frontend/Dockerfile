@@ -1,31 +1,25 @@
-# Этап сборки
-FROM node:18-alpine as build
+# 1. Сборка фронта
+FROM node:18-slim AS build
 
 WORKDIR /app
 
-# Копирование package.json
-COPY package.json ./
+# Копируем только package.json и lock для кэширования зависимостей
+COPY package.json package-lock.json ./
+RUN npm ci --legacy-peer-deps
 
-# Установка зависимостей (создаст package-lock.json если его нет)
-RUN npm install
-
-# Копирование исходного кода
+# Копируем исходники
 COPY . .
 
-# Сборка приложения
+# Отключаем sourcemap для ускорения
+ENV GENERATE_SOURCEMAP=false
+
 RUN npm run build
 
-# Этап продакшена
-FROM nginx:alpine
+# 2. Сервер для статики
+FROM nginx:alpine AS production
 
-# Копирование собранного приложения
 COPY --from=build /app/build /usr/share/nginx/html
-
-# Копирование конфигурации nginx
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Открытие порта
 EXPOSE 80
-
-# Запуск nginx
 CMD ["nginx", "-g", "daemon off;"] 

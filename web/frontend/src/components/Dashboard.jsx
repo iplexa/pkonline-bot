@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { useAuth } from '../contexts/AuthContext';
-import Charts from './Charts';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import Charts from './Charts.jsx';
 
 const Dashboard = () => {
     const { isAuthenticated, user, logout } = useAuth();

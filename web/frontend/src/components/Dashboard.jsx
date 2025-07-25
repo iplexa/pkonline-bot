@@ -11,8 +11,6 @@ const Dashboard = () => {
     });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [selectedQueue, setSelectedQueue] = useState(null);
-    const [queueApplications, setQueueApplications] = useState([]);
     const [showReport, setShowReport] = useState(false);
     const [reportData, setReportData] = useState(null);
     const [reportLoading, setReportLoading] = useState(false);
@@ -56,21 +54,6 @@ const Dashboard = () => {
         } finally {
             setLoading(false);
         }
-    };
-
-    const fetchQueueApplications = async (queueType) => {
-        try {
-            const response = await axios.get(`/dashboard/queues/${queueType}/applications`);
-            setQueueApplications(response.data);
-            setSelectedQueue(queueType);
-        } catch (err) {
-            console.error('Error fetching queue applications:', err);
-        }
-    };
-
-    const closeQueueView = () => {
-        setSelectedQueue(null);
-        setQueueApplications([]);
     };
 
     const handleLogout = () => {
@@ -165,68 +148,6 @@ const Dashboard = () => {
             <div className="container mt-5">
                 <div className="alert alert-danger" role="alert">
                     {error}
-                </div>
-            </div>
-        );
-    }
-
-    if (selectedQueue) {
-        return (
-            <div className="container mt-4">
-                <div className="d-flex justify-content-between align-items-center mb-4">
-                    <h1>Очередь: {data.queueStats.find(q => q.queue_type === selectedQueue)?.queue_name || selectedQueue}</h1>
-                    <button onClick={closeQueueView} className="btn btn-outline-secondary">
-                        <i className="fas fa-arrow-left me-2"></i>
-                        Назад к дашборду
-                    </button>
-                </div>
-                
-                <div className="card">
-                    <div className="card-header">
-                        <h5>Заявления в очереди</h5>
-                    </div>
-                    <div className="card-body">
-                        {queueApplications.length > 0 ? (
-                            <div className="table-responsive">
-                                <table className="table table-striped">
-                                    <thead>
-                                        <tr>
-                                            <th>ID</th>
-                                            <th>ФИО</th>
-                                            <th>Статус</th>
-                                            <th>Время подачи</th>
-                                            <th>Обработано</th>
-                                            <th>Обработал</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {queueApplications.map((app, index) => (
-                                            <tr key={index}>
-                                                <td>{app.id}</td>
-                                                <td>{app.fio}</td>
-                                                <td>
-                                                    <span className={`badge ${
-                                                        app.status === 'accepted' ? 'bg-success' :
-                                                        app.status === 'rejected' ? 'bg-danger' :
-                                                        app.status === 'in_progress' ? 'bg-warning' :
-                                                        app.status === 'queued' ? 'bg-secondary' :
-                                                        'bg-info'
-                                                    }`}>
-                                                        {app.status}
-                                                    </span>
-                                                </td>
-                                                <td>{new Date(app.submitted_at).toLocaleString('ru-RU')}</td>
-                                                <td>{app.processed_at ? new Date(app.processed_at).toLocaleString('ru-RU') : '-'}</td>
-                                                <td>{app.processed_by_fio || '-'}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        ) : (
-                            <p>Нет заявлений в очереди</p>
-                        )}
-                    </div>
                 </div>
             </div>
         );
@@ -445,8 +366,9 @@ const Dashboard = () => {
                                             <div className="d-flex justify-content-between align-items-center mb-2">
                                                 <h6 className="mb-0">{queue.queue_name}</h6>
                                                 <button 
-                                                    onClick={() => fetchQueueApplications(queue.queue_type)}
+                                                    onClick={() => {/* No action for now */}}
                                                     className="btn btn-sm btn-outline-primary"
+                                                    disabled
                                                 >
                                                     <i className="fas fa-eye me-1"></i>
                                                     Просмотр

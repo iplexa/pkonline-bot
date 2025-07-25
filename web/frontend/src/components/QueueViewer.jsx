@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Modal, Button, Form } from 'react-bootstrap';
+import { useAuth } from '../contexts/AuthContext.jsx';
 
 const QueueViewer = () => {
+    const { user } = useAuth();
     const [selectedQueue, setSelectedQueue] = useState('lk');
     const [statusFilter, setStatusFilter] = useState('all');
     const [applications, setApplications] = useState([]);
@@ -96,7 +98,7 @@ const QueueViewer = () => {
     const fetchApplications = async () => {
         try {
             setLoading(true);
-            const response = await axios.get(`сд/dashboard/queues/${selectedQueue}/applications`);
+            const response = await axios.get(`/dashboard/queues/${selectedQueue}/applications`);
             setApplications(response.data);
         } catch (error) {
             console.error('Ошибка загрузки заявлений:', error);
@@ -145,6 +147,18 @@ const QueueViewer = () => {
         return matchesStatus && matchesSearch;
     });
 
+    // Only show queues/actions if user has rights
+    const allowedQueues = queueTypes.filter(q => {
+        if (!user) return false;
+        if (user.is_admin) return true;
+        // Пример: только определённые очереди для обычных сотрудников
+        if (q.value === 'lk' && user.can_process_lk) return true;
+        if (q.value === 'epgu' && user.can_process_epgu) return true;
+        if (q.value === 'epgu_mail' && user.can_process_epgu_mail) return true;
+        if (q.value === 'epgu_problem' && user.can_process_epgu_problem) return true;
+        return false;
+    });
+
     return (
         <div className="queue-viewer">
             {/* Queue Selection */}
@@ -160,7 +174,7 @@ const QueueViewer = () => {
                         <div className="col-md-6">
                             <label className="form-label fw-semibold">Выберите очередь:</label>
                             <div className="btn-group w-100" role="group">
-                                {queueTypes.map((queue) => (
+                                {allowedQueues.map((queue) => (
                                     <button
                                         key={queue.value}
                                         type="button"
@@ -307,31 +321,33 @@ const QueueViewer = () => {
                                                 </div>
                                             </td>
                                             <td>
-                                                {/* Кнопки действий для ЕПГУ и Почты */}
-                                                {['epgu', 'epgu_mail'].includes(app.queue_type) && app.status === 'queued' && (
-                                                    <>
-                                                        <button className="btn btn-sm btn-success me-1" title="Принять" onClick={() => handleAction(app, 'accept')}><i className="fas fa-check"></i></button>
-                                                        <button className="btn btn-sm btn-danger me-1" title="Отклонить" onClick={() => handleAction(app, 'reject')}><i className="fas fa-times"></i></button>
-                                                        {app.queue_type === 'epgu' && (
-                                                            <>
-                                                                <button className="btn btn-sm btn-warning me-1" title="На подпись (почта)" onClick={() => handleAction(app, 'to_mail')}><i className="fas fa-envelope"></i></button>
-                                                                <button className="btn btn-sm btn-secondary me-1" title="Проблемное" onClick={() => handleAction(app, 'to_problem')}><i className="fas fa-exclamation-triangle"></i></button>
-                                                            </>
-                                                        )}
-                                                        {app.queue_type === 'epgu_mail' && (
-                                                            <>
-                                                                <button className="btn btn-sm btn-info me-1" title="Подтвердить сканы" onClick={() => handleAction(app, 'confirm_scans')}><i className="fas fa-file-alt"></i></button>
-                                                                <button className="btn btn-sm btn-primary me-1" title="Подтвердить подпись" onClick={() => handleAction(app, 'confirm_signature')}><i className="fas fa-pen"></i></button>
-                                                            </>
-                                                        )}
-                                                    </>
-                                                )}
-                                                <button 
-                                                    className="btn btn-sm btn-outline-info"
-                                                    title="Подробности"
-                                                >
-                                                    <i className="fas fa-eye"></i>
-                                                </button>
+                                                {/* Кнопки действий для заявлений, только если у пользователя есть права */}
+                                                {user && (user.is_admin || user.can_process_epgu || user.can_process_epgu_mail || user.can_process_lk) && [
+                                                    ['epgu', 'epgu_mail', 'lk'].includes(app.queue_type) && app.status === 'queued' && (
+                                                        <>
+                                                            <button className="btn btn-sm btn-success me-1" title="Принять" onClick={() => handleAction(app, 'accept')}><i className="fas fa-check"></i></button>
+                                                            <button className="btn btn-sm btn-danger me-1" title="Отклонить" onClick={() => handleAction(app, 'reject')}><i className="fas fa-times"></i></button>
+                                                            {app.queue_type === 'epgu' && (
+                                                                <>
+                                                                    <button className="btn btn-sm btn-warning me-1" title="На подпись (почта)" onClick={() => handleAction(app, 'to_mail')}><i className="fas fa-envelope"></i></button>
+                                                                    <button className="btn btn-sm btn-secondary me-1" title="Проблемное" onClick={() => handleAction(app, 'to_problem')}><i className="fas fa-exclamation-triangle"></i></button>
+                                                                </>
+                                                            )}
+                                                            {app.queue_type === 'epgu_mail' && (
+                                                                <>
+                                                                    <button className="btn btn-sm btn-info me-1" title="Подтвердить сканы" onClick={() => handleAction(app, 'confirm_scans')}><i className="fas fa-file-alt"></i></button>
+                                                                    <button className="btn btn-sm btn-primary me-1" title="Подтвердить подпись" onClick={() => handleAction(app, 'confirm_signature')}><i className="fas fa-pen"></i></button>
+                                                                </>
+                                                            )}
+                                                        </>
+                                                    ),
+                                                    <button 
+                                                        className="btn btn-sm btn-outline-info"
+                                                        title="Подробности"
+                                                    >
+                                                        <i className="fas fa-eye"></i>
+                                                    </button>
+                                                ]}
                                             </td>
                                         </tr>
                                     ))}

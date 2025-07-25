@@ -25,6 +25,7 @@ services:
       retries: 5
     networks:
       - pkonline-network
+    profiles: ["localdb"]
 
   bot:
     build: .
@@ -58,9 +59,6 @@ services:
       THREAD_PROBLEM_IN_PROGRESS: ${THREAD_PROBLEM_IN_PROGRESS:-0}
       THREAD_QUEUE_UPDATED: ${THREAD_QUEUE_UPDATED:-0}
       THREAD_ESCALATION: ${THREAD_ESCALATION:-0}
-    depends_on:
-      db:
-        condition: service_healthy
     restart: always
     volumes:
       - .:/app
@@ -96,9 +94,6 @@ services:
       - "8000:8000"
     networks:
       - pkonline-network
-    depends_on:
-      db:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]
       interval: 30s

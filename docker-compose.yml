@@ -34,7 +34,7 @@ services:
       # Настройки БД (локальная или внешняя)
       USE_EXTERNAL_DB: false
       EXTERNAL_DB_PORT: 35432
-      DB_DSN: ""
+      DB_DSN: "postgresql+asyncpg://pkonline:pkonline@db:5432/pkonline"
       EXTERNAL_DB_HOST: ${EXTERNAL_DB_HOST}
       EXTERNAL_DB_NAME: ${EXTERNAL_DB_NAME}
       EXTERNAL_DB_USER: ${EXTERNAL_DB_USER}

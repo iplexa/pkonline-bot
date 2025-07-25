@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Modal, Button, Form } from 'react-bootstrap';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { FaCheck, FaTimes, FaExclamationTriangle, FaEnvelope, FaFileAlt, FaPen, FaEye, FaHandPaper, FaStar } from 'react-icons/fa';
 
 const QueueViewer = () => {
     const { user } = useAuth();
@@ -18,6 +19,8 @@ const QueueViewer = () => {
     const [searchMode, setSearchMode] = useState(false);
     const [searchResults, setSearchResults] = useState([]);
     const [searchLoading, setSearchLoading] = useState(false);
+    const [showTakeModal, setShowTakeModal] = useState(false);
+    const [takeApp, setTakeApp] = useState(null);
 
     const queueTypes = [
         { value: 'lk', name: 'Личный кабинет', icon: 'fas fa-user' },
@@ -67,10 +70,33 @@ const QueueViewer = () => {
     const handleTakeNext = async () => {
         setActionLoading(true);
         try {
-            await axios.post(`/dashboard/queues/${selectedQueue}/next`);
-            fetchApplications();
+            const res = await axios.post(`/dashboard/queues/${selectedQueue}/next`);
+            // res.data должен содержать заявление, если оно есть
+            if (res.data && res.data.fio) {
+                setTakeApp(res.data);
+                setShowTakeModal(true);
+            } else {
+                setTakeApp(null);
+                setShowTakeModal(false);
+                fetchApplications();
+            }
         } catch (e) {
             alert('Нет доступных заявлений или ошибка: ' + (e.response?.data?.detail || e.message));
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const handleTakeAction = async (action) => {
+        if (!takeApp) return;
+        setActionLoading(true);
+        try {
+            await axios.patch(`/dashboard/applications/${takeApp.id}/process`, { action });
+            setShowTakeModal(false);
+            setTakeApp(null);
+            fetchApplications();
+        } catch (e) {
+            alert('Ошибка обработки: ' + (e.response?.data?.detail || e.message));
         } finally {
             setActionLoading(false);
         }
@@ -233,7 +259,7 @@ const QueueViewer = () => {
                                 onClick={handleTakeNext}
                                 disabled={actionLoading}
                             >
-                                <i className="fas fa-hand-paper"></i> Взять заявление
+                                <FaHandPaper className="me-1" /> Взять заявление
                             </button>
                             <button
                                 className="btn btn-info"
@@ -391,6 +417,50 @@ const QueueViewer = () => {
                     <Button variant="primary" onClick={processApplication} disabled={actionLoading || ((modalType === 'reject' || modalType === 'to_problem') && !modalReason)}>
                         {actionLoading ? 'Выполняется...' : 'Подтвердить'}
                     </Button>
+                </Modal.Footer>
+            </Modal>
+
+            {/* Модальное окно для взятия заявления */}
+            <Modal show={showTakeModal} onHide={() => setShowTakeModal(false)} centered>
+                <Modal.Header closeButton>
+                    <Modal.Title>Первое заявление в очереди</Modal.Title>
+                </Modal.Header>
+                <Modal.Body>
+                    {takeApp ? (
+                        <div>
+                            <div className="mb-3">
+                                <strong>ФИО:</strong> {takeApp.fio}
+                            </div>
+                            <div className="mb-3">
+                                <strong>ID:</strong> #{takeApp.id}
+                            </div>
+                            <div className="mb-3">
+                                <strong>Очередь:</strong> {queueTypes.find(q => q.value === takeApp.queue_type)?.name}
+                            </div>
+                            <div className="mb-3">
+                                <strong>Статус:</strong> {getStatusBadge(takeApp.status)}
+                            </div>
+                            <div className="d-flex flex-wrap gap-2">
+                                <Button variant="success" onClick={() => handleTakeAction('accept')} disabled={actionLoading}><FaCheck className="me-1" /> Принять</Button>
+                                <Button variant="danger" onClick={() => handleTakeAction('reject')} disabled={actionLoading}><FaTimes className="me-1" /> Отклонить</Button>
+                                <Button variant="warning" onClick={() => handleTakeAction('to_problem')} disabled={actionLoading}><FaExclamationTriangle className="me-1" /> Проблема</Button>
+                                {takeApp.queue_type === 'epgu' && (
+                                    <Button variant="info" onClick={() => handleTakeAction('to_mail')} disabled={actionLoading}><FaEnvelope className="me-1" /> На подпись (почта)</Button>
+                                )}
+                                {takeApp.queue_type === 'epgu_mail' && (
+                                    <>
+                                        <Button variant="secondary" onClick={() => handleTakeAction('confirm_scans')} disabled={actionLoading}><FaFileAlt className="me-1" /> Подтвердить сканы</Button>
+                                        <Button variant="primary" onClick={() => handleTakeAction('confirm_signature')} disabled={actionLoading}><FaPen className="me-1" /> Подтвердить подпись</Button>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    ) : (
+                        <div>Нет заявлений в очереди.</div>
+                    )}
+                </Modal.Body>
+                <Modal.Footer>
+                    <Button variant="secondary" onClick={() => setShowTakeModal(false)} disabled={actionLoading}>Закрыть</Button>
                 </Modal.Footer>
             </Modal>
         </div>

@@ -6,6 +6,7 @@ import './App.css';
 import { useAuth } from './contexts/AuthContext';
 import { Routes, Route, Link, Navigate } from 'react-router-dom';
 import QueueViewer from './components/QueueViewer.jsx';
+import { FaUserCircle, FaSignOutAlt, FaTachometerAlt, FaClipboardList } from 'react-icons/fa';
 
 function App() {
   return (
@@ -18,7 +19,7 @@ function App() {
 }
 
 function AppContent() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, user, logout } = useAuth();
 
   if (loading) {
     return (
@@ -34,18 +35,33 @@ function AppContent() {
 
   return (
     <>
-      <nav className="navbar navbar-expand-lg navbar-light bg-light mb-4">
+      <nav className="navbar navbar-expand-lg navbar-dark bg-gradient-primary shadow-sm mb-4" style={{background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'}}>
         <div className="container-fluid">
-          <Link className="navbar-brand fw-bold" to="/dashboard">PKOnline</Link>
+          <Link className="navbar-brand fw-bold d-flex align-items-center" to="/dashboard">
+            <FaTachometerAlt className="me-2" /> PKOnline
+          </Link>
           <div className="collapse navbar-collapse">
             <ul className="navbar-nav me-auto mb-2 mb-lg-0">
               <li className="nav-item">
-                <Link className="nav-link" to="/dashboard">Дашборд</Link>
+                <Link className="nav-link d-flex align-items-center" to="/dashboard">
+                  <FaTachometerAlt className="me-1" /> Дашборд
+                </Link>
               </li>
               <li className="nav-item">
-                <Link className="nav-link" to="/processing">Обработка заявлений</Link>
+                <Link className="nav-link d-flex align-items-center" to="/processing">
+                  <FaClipboardList className="me-1" /> Обработка заявлений
+                </Link>
               </li>
             </ul>
+            <div className="d-flex align-items-center ms-auto">
+              <span className="text-white fw-semibold me-3 d-flex align-items-center">
+                <FaUserCircle className="me-1" style={{fontSize: '1.5rem'}} />
+                {user?.fio || user?.username || 'Пользователь'}
+              </span>
+              <button className="btn btn-outline-light btn-sm d-flex align-items-center" onClick={logout}>
+                <FaSignOutAlt className="me-1" /> Выйти
+              </button>
+            </div>
           </div>
         </div>
       </nav>

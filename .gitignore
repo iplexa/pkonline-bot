@@ -154,3 +154,35 @@ pgdata/
 *.xlsx
 *.xls
 uploads/ 
+
+# React/Vite frontend build artifacts
+web/frontend/build/
+web/frontend/dist/ 
+
+# Node.js
+node_modules/
+web/frontend/node_modules/
+web/frontend/.env
+web/frontend/.env.*
+web/frontend/.cache/
+web/frontend/npm-debug.log*
+web/frontend/yarn-debug.log*
+web/frontend/yarn-error.log*
+web/frontend/.next/
+web/frontend/.turbo/
+web/frontend/.parcel-cache/
+web/frontend/.eslintcache
+
+# Mac/OSX
+web/frontend/.DS_Store
+
+# Vite/React
+web/frontend/.vite/
+
+# Logs
+*.log
+
+# Editor swap/backup
+*~
+*.swp
+*.swo 

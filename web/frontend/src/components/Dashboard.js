@@ -7,7 +7,6 @@ const Dashboard = () => {
     const { isAuthenticated, user, logout } = useAuth();
     const [data, setData] = useState({
         employees: [],
-        recentApplications: [],
         queueStats: {}
     });
     const [loading, setLoading] = useState(true);
@@ -492,44 +491,7 @@ const Dashboard = () => {
                             <h5>Последние обработанные заявления</h5>
                         </div>
                         <div className="card-body">
-                            {data.recentApplications.length > 0 ? (
-                                <div className="table-responsive">
-                                    <table className="table table-striped">
-                                        <thead>
-                                            <tr>
-                                                <th>ID</th>
-                                                <th>ФИО</th>
-                                                <th>Очередь</th>
-                                                <th>Статус</th>
-                                                <th>Время обработки</th>
-                                                <th>Обработал</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {data.recentApplications.map((app, index) => (
-                                                <tr key={index}>
-                                                    <td>{app.id}</td>
-                                                    <td>{app.fio}</td>
-                                                    <td>{app.queue_type}</td>
-                                                    <td>
-                                                        <span className={`badge ${
-                                                            app.status === 'accepted' ? 'bg-success' :
-                                                            app.status === 'rejected' ? 'bg-danger' :
-                                                            'bg-warning'
-                                                        }`}>
-                                                            {app.status}
-                                                        </span>
-                                                    </td>
-                                                    <td>{new Date(app.processed_at).toLocaleString('ru-RU')}</td>
-                                                    <td>{app.processed_by_fio || '-'}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            ) : (
-                                <p>Нет обработанных заявлений</p>
-                            )}
+                            {/* Секция последних обработанных заявлений удалена */}
                         </div>
                     </div>
                 </div>

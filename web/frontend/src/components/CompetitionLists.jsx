@@ -92,7 +92,7 @@ const CompetitionLists = () => {
                             
                             <div className="row g-3">
                                 {competitionLinks.map((link, index) => (
-                                    <div key={index} className="col-md-6 col-lg-4">
+                                    <div key={index} className="col-sm-6 col-md-4 col-lg-4">
                                         <div 
                                             className={`card h-100 competition-card border-${link.color} shadow-sm`}
                                             style={{

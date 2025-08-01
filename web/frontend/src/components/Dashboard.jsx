@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import Charts from './Charts.jsx';
 
 const Dashboard = () => {
-    const { isAuthenticated, user, logout } = useAuth();
+    const { isAuthenticated, user } = useAuth();
     const [data, setData] = useState({
         employees: [],
         queueStats: {}
@@ -47,17 +47,13 @@ const Dashboard = () => {
         } catch (err) {
             console.error('Error fetching data:', err);
             if (err.response?.status === 401) {
-                logout();
+                // Ошибка авторизации будет обработана в AuthContext
             } else {
                 setError('Ошибка загрузки данных');
             }
         } finally {
             setLoading(false);
         }
-    };
-
-    const handleLogout = () => {
-        logout();
     };
 
     const fetchFullReport = async (date = null) => {
@@ -155,14 +151,8 @@ const Dashboard = () => {
 
     return (
         <div className="container mt-4">
-            <div className="d-flex justify-content-between align-items-center mb-4">
+            <div className="mb-4">
                 <h1>Панель управления</h1>
-                <div className="d-flex align-items-center">
-                    <span className="me-3">Пользователь: {user?.fio}</span>
-                    <button onClick={handleLogout} className="btn btn-outline-danger">
-                        Выйти
-                    </button>
-                </div>
             </div>
             
             {user?.is_admin && (

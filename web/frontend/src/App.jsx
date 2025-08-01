@@ -6,7 +6,8 @@ import './App.css';
 import { useAuth } from './contexts/AuthContext';
 import { Routes, Route, Link, Navigate } from 'react-router-dom';
 import QueueViewer from './components/QueueViewer.jsx';
-import { FaUserCircle, FaSignOutAlt, FaTachometerAlt, FaClipboardList } from 'react-icons/fa';
+import CompetitionLists from './components/CompetitionLists.jsx';
+import { FaUserCircle, FaSignOutAlt, FaTachometerAlt, FaClipboardList, FaGraduationCap } from 'react-icons/fa';
 
 function App() {
   return (
@@ -52,6 +53,11 @@ function AppContent() {
                   <FaClipboardList className="me-1" /> Обработка заявлений
                 </Link>
               </li>
+              <li className="nav-item">
+                <Link className="nav-link d-flex align-items-center" to="/competition-lists">
+                  <FaGraduationCap className="me-1" /> Конкурсные списки
+                </Link>
+              </li>
             </ul>
             <div className="d-flex align-items-center ms-auto">
               <span className="text-white fw-semibold me-3 d-flex align-items-center">
@@ -68,6 +74,7 @@ function AppContent() {
       <Routes>
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/processing" element={<QueueViewer />} />
+        <Route path="/competition-lists" element={<CompetitionLists />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </>

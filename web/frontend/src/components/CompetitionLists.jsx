@@ -90,9 +90,9 @@ const CompetitionLists = () => {
                                 Выберите направление подготовки для просмотра конкурсного списка абитуриентов
                             </p>
                             
-                            <div className="row g-4">
+                            <div className="row g-3">
                                 {competitionLinks.map((link, index) => (
-                                    <div key={index} className="col-lg-6 col-xl-4">
+                                    <div key={index} className="col-md-6 col-lg-4">
                                         <div 
                                             className={`card h-100 competition-card border-${link.color} shadow-sm`}
                                             style={{
@@ -110,22 +110,22 @@ const CompetitionLists = () => {
                                             }}
                                             onClick={() => handleButtonClick(link.url)}
                                         >
-                                            <div className={`card-body text-center bg-${link.color} bg-opacity-10`}>
-                                                <div className="mb-3">
-                                                    <FaGraduationCap 
-                                                        className={`text-${link.color}`} 
-                                                        style={{fontSize: '2.5rem'}}
-                                                    />
-                                                </div>
-                                                <h5 className={`card-title text-${link.color} fw-bold mb-3`}>
-                                                    {link.name}
-                                                </h5>
-                                                <button 
-                                                    className={`btn btn-${link.color} btn-lg w-100 d-flex align-items-center justify-content-center gap-2`}
-                                                    style={{
-                                                        transition: 'all 0.2s ease',
-                                                        fontWeight: '600'
-                                                    }}
+                                                                                         <div className={`card-body text-center bg-${link.color} bg-opacity-10`}>
+                                                 <div className="mb-2">
+                                                     <FaGraduationCap 
+                                                         className={`text-${link.color}`} 
+                                                         style={{fontSize: '2rem'}}
+                                                     />
+                                                 </div>
+                                                 <h6 className={`card-title text-${link.color} fw-bold mb-2`}>
+                                                     {link.name}
+                                                 </h6>
+                                                                                                 <button 
+                                                     className={`btn btn-${link.color} btn-sm w-100 d-flex align-items-center justify-content-center gap-1`}
+                                                     style={{
+                                                         transition: 'all 0.2s ease',
+                                                         fontWeight: '600'
+                                                     }}
                                                     onMouseEnter={(e) => {
                                                         e.currentTarget.style.transform = 'scale(1.05)';
                                                     }}

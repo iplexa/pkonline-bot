@@ -1,12 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 from app.database import get_db
 from app.services.dashboard_service import DashboardService
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_admin_user
 from datetime import datetime
-from db.models import ApplicationStatusEnum, Application
+from db.models import ApplicationStatusEnum, Application, WorkDay
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -157,4 +157,19 @@ def process_application(
     else:
         raise HTTPException(status_code=400, detail="Неизвестное действие")
     db.commit()
-    return {"success": True} 
+    return {"success": True}
+
+@router.patch("/workday/{workday_id}/applications_processed")
+def update_applications_processed(
+    workday_id: int,
+    applications_processed: int = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    current_admin = Depends(get_current_admin_user)
+):
+    """Изменить количество обработанных заявлений для рабочего дня (только для админов)"""
+    workday = db.query(WorkDay).filter(WorkDay.id == workday_id).first()
+    if not workday:
+        raise HTTPException(status_code=404, detail="Рабочий день не найден")
+    workday.applications_processed = applications_processed
+    db.commit()
+    return {"success": True, "workday_id": workday_id, "applications_processed": applications_processed} 

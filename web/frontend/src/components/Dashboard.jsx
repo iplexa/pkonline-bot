@@ -23,6 +23,7 @@ const Dashboard = () => {
     const [setPasswordLoading, setSetPasswordLoading] = useState(false);
     const [setPasswordMessage, setSetPasswordMessage] = useState('');
     const [setPasswordError, setSetPasswordError] = useState('');
+    const [editApplicationsModal, setEditApplicationsModal] = useState({ open: false, workday: null, value: '' });
 
     useEffect(() => {
         if (isAuthenticated) {
@@ -124,6 +125,25 @@ const Dashboard = () => {
             setSetPasswordError(err.response?.data?.detail || 'Ошибка при смене пароля');
         } finally {
             setSetPasswordLoading(false);
+        }
+    };
+
+    const handleEditApplicationsProcessed = async () => {
+        if (!editApplicationsModal.workday) return;
+        try {
+            // TODO: заменить URL на актуальный, когда backend будет готов
+            await axios.patch(`/dashboard/workday/${editApplicationsModal.workday.id}/applications_processed`, {
+                applications_processed: Number(editApplicationsModal.value)
+            });
+            // Обновить отчет после успешного изменения
+            if (selectedReportDate) {
+                await fetchFullReport(selectedReportDate);
+            } else {
+                await fetchFullReport();
+            }
+            setEditApplicationsModal({ open: false, workday: null, value: '' });
+        } catch (err) {
+            alert('Ошибка при сохранении: ' + (err.response?.data?.detail || err.message));
         }
     };
 
@@ -256,7 +276,13 @@ const Dashboard = () => {
                                                         <td>{r.end_time ? new Date(r.end_time).toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}) : '-'}</td>
                                                         <td>{r.total_work_time != null ? `${Math.floor(r.total_work_time/3600).toString().padStart(2,'0')}:${Math.floor((r.total_work_time%3600)/60).toString().padStart(2,'0')}` : '-'}</td>
                                                         <td>{r.total_break_time != null ? `${Math.floor(r.total_break_time/3600).toString().padStart(2,'0')}:${Math.floor((r.total_break_time%3600)/60).toString().padStart(2,'0')}` : '-'}</td>
-                                                        <td>{r.applications_processed}</td>
+                                                        <td>{r.applications_processed}
+                                                            {user?.is_admin && (
+                                                                <button className="btn btn-link btn-sm p-0 ms-2" title="Изменить" onClick={() => setEditApplicationsModal({ open: true, workday: r, value: r.applications_processed })}>
+                                                                    <i className="fas fa-edit"></i>
+                                                                </button>
+                                                            )}
+                                                        </td>
                                                         <td>
                                                             {r.breaks && r.breaks.length > 0 ? (
                                                                 <ul className="mb-0 ps-3">
@@ -274,6 +300,15 @@ const Dashboard = () => {
                                                     </tr>
                                                 ))}
                                             </tbody>
+                                            <tfoot>
+                                                <tr>
+                                                    <td colSpan="5" className="text-end fw-bold">Итого заявлений обработано:</td>
+                                                    <td className="fw-bold">
+                                                        {reportData.reduce((sum, r) => sum + (r.applications_processed || 0), 0)}
+                                                    </td>
+                                                    <td></td>
+                                                </tr>
+                                            </tfoot>
                                         </table>
                                     </div>
                                 ) : (
@@ -282,6 +317,33 @@ const Dashboard = () => {
                             </div>
                             <div className="modal-footer">
                                 <button type="button" className="btn btn-secondary" onClick={closeReport}>Закрыть</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {editApplicationsModal.open && (
+                <div className="modal show d-block" tabIndex="-1" role="dialog" style={{background: 'rgba(0,0,0,0.2)'}}>
+                    <div className="modal-dialog" role="document">
+                        <div className="modal-content">
+                            <div className="modal-header">
+                                <h5 className="modal-title">Изменить количество обработанных заявлений</h5>
+                                <button type="button" className="btn-close" onClick={() => setEditApplicationsModal({ open: false, workday: null, value: '' })}></button>
+                            </div>
+                            <div className="modal-body">
+                                <div className="mb-3">
+                                    <label className="form-label">Сотрудник</label>
+                                    <input type="text" className="form-control" value={editApplicationsModal.workday?.employee_fio || ''} disabled />
+                                </div>
+                                <div className="mb-3">
+                                    <label className="form-label">Количество обработанных заявлений</label>
+                                    <input type="number" className="form-control" min="0" value={editApplicationsModal.value} onChange={e => setEditApplicationsModal(modal => ({ ...modal, value: e.target.value }))} />
+                                </div>
+                            </div>
+                            <div className="modal-footer">
+                                <button type="button" className="btn btn-secondary" onClick={() => setEditApplicationsModal({ open: false, workday: null, value: '' })}>Отмена</button>
+                                <button type="button" className="btn btn-primary" onClick={handleEditApplicationsProcessed}>Сохранить</button>
                             </div>
                         </div>
                     </div>

@@ -175,7 +175,7 @@ const Dashboard = () => {
                 <h1>Панель управления</h1>
             </div>
             
-            {user?.is_admin && (
+            {user?.is_admin && false && (
                 <div className="mb-3">
                     <button className="btn btn-warning" onClick={openSetPassword}>
                         <i className="fas fa-key me-2"></i>Сменить пароль сотрудника

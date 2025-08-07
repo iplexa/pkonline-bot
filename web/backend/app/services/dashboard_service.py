@@ -395,6 +395,7 @@ class DashboardService:
                 total_work_time = elapsed_seconds - total_break_time
             report = {
                 "workday_id": work_day.id,
+                "employee_id": work_day.employee.id if work_day.employee else None,
                 "employee_fio": work_day.employee.fio if work_day.employee else None,
                 "employee_tg_id": work_day.employee.tg_id if work_day.employee else None,
                 "date": work_day.date.date() if work_day.date else None,

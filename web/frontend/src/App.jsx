@@ -7,6 +7,7 @@ import { useAuth } from './contexts/AuthContext';
 import { Routes, Route, Link, Navigate } from 'react-router-dom';
 import QueueViewer from './components/QueueViewer.jsx';
 import CompetitionLists from './components/CompetitionLists.jsx';
+import AdminPanel from './components/AdminPanel.jsx';
 import { FaUserCircle, FaSignOutAlt, FaTachometerAlt, FaClipboardList, FaGraduationCap } from 'react-icons/fa';
 
 function App() {
@@ -58,6 +59,13 @@ function AppContent() {
                   <FaGraduationCap className="me-1" /> Конкурсные списки
                 </Link>
               </li>
+              {user?.is_admin && (
+                <li className="nav-item">
+                  <Link className="nav-link d-flex align-items-center" to="/admin">
+                    <FaUserCircle className="me-1" /> Админ
+                  </Link>
+                </li>
+              )}
             </ul>
             <div className="d-flex align-items-center ms-auto">
               <span className="text-white fw-semibold me-3 d-flex align-items-center">
@@ -75,6 +83,7 @@ function AppContent() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/processing" element={<QueueViewer />} />
         <Route path="/competition-lists" element={<CompetitionLists />} />
+        <Route path="/admin" element={user?.is_admin ? <AdminPanel /> : <Navigate to="/dashboard" replace />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </>
